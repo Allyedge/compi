@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     fs::{self, File},
     io::BufReader,
-    path::Path,
+    path::{Path, PathBuf},
 };
 
 use serde::{Deserialize, Serialize};
@@ -23,8 +23,8 @@ impl Cache {
     }
 }
 
-pub fn load_cache(cache_dir: Option<&str>) -> Cache {
-    let cache_path = get_cache_path(cache_dir);
+pub fn load_cache(cache_dir: Option<&str>, config_path: &str) -> Cache {
+    let cache_path = get_cache_path(cache_dir, config_path);
 
     let file = match File::open(&cache_path) {
         Ok(file) => file,
@@ -35,8 +35,8 @@ pub fn load_cache(cache_dir: Option<&str>) -> Cache {
     serde_json::from_reader(reader).unwrap_or_default()
 }
 
-pub fn save_cache(cache: &Cache, cache_dir: Option<&str>) {
-    let cache_path = get_cache_path(cache_dir);
+pub fn save_cache(cache: &Cache, cache_dir: Option<&str>, config_path: &str) {
+    let cache_path = get_cache_path(cache_dir, config_path);
 
     if let Some(parent) = Path::new(&cache_path).parent() {
         if let Err(e) = fs::create_dir_all(parent) {
@@ -57,7 +57,18 @@ pub fn save_cache(cache: &Cache, cache_dir: Option<&str>) {
     }
 }
 
-fn get_cache_path(cache_dir: Option<&str>) -> String {
-    let dir = cache_dir.unwrap_or(DEFAULT_CACHE_DIR);
-    format!("{}/{}", dir, CACHE_FILENAME)
+fn get_cache_path(cache_dir: Option<&str>, config_path: &str) -> PathBuf {
+    let config_parent = Path::new(config_path)
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+
+    let cache_dir = cache_dir.unwrap_or(DEFAULT_CACHE_DIR);
+
+    let cache_dir_path = if Path::new(cache_dir).is_absolute() {
+        PathBuf::from(cache_dir)
+    } else {
+        config_parent.join(cache_dir)
+    };
+
+    cache_dir_path.join(CACHE_FILENAME)
 }

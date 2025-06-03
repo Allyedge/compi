@@ -54,9 +54,6 @@ sudo mv compi-macos /usr/local/bin/compi
 
 Download the executable from the releases page and add it to your PATH.
 
-```bash
-```
-
 ## CLI Usage
 
 ```bash
@@ -107,27 +104,81 @@ outputs = ["target/app"]    # Output files
 default = "build"
 cache_dir = ".build-cache"
 
+[variables]
+TARGET_DIR = "target"
+APP_NAME = "myapp"
+SOURCE_PATTERN = "src/**/*.rs"
+TEST_PATTERN = "tests/**/*.rs"
+
 [task.prepare]
 id = "prep"
-command = "mkdir -p target"
-outputs = ["target/"]
+command = "mkdir -p ${TARGET_DIR}"
+outputs = ["${TARGET_DIR}/"]
 
 [task.build]
 command = "cargo build"
 dependencies = ["prep"]
 inputs = [
-    "src/**/*.rs",
+    "${SOURCE_PATTERN}",
     "Cargo.toml"
 ]
-outputs = ["target/debug/myapp"]
+outputs = ["${TARGET_DIR}/debug/${APP_NAME}"]
 
 [task.test]
 command = "cargo test"
 dependencies = ["build"]
-inputs = ["src/**/*.rs", "tests/**/*.rs"]
+inputs = ["${SOURCE_PATTERN}", "${TEST_PATTERN}"]
 
 [task.clean]
-command = "rm -rf target/"
+command = "rm -rf ${TARGET_DIR}/"
+```
+
+## Variables
+
+Compi supports variables for reducing duplication and making configurations more maintainable.
+
+### Variable Definition
+
+Define variables in the `[variables]` section:
+
+```toml
+[variables]
+TARGET_DIR = "target"
+BUILD_TYPE = "debug"
+BINARY_NAME = "myapp"
+SOURCE_PATTERN = "src/**/*.rs"
+COMPILE_FLAGS = "--release --target x86_64-unknown-linux-gnu"
+```
+
+### Variable Usage
+
+Use variables anywhere in your configuration with `${VAR_NAME}` or `$VAR_NAME` syntax:
+
+```toml
+[task.build]
+command = "cargo build ${COMPILE_FLAGS}"
+inputs = ["${SOURCE_PATTERN}", "Cargo.toml"]
+outputs = ["${TARGET_DIR}/${BUILD_TYPE}/${BINARY_NAME}"]
+```
+
+### Built-in Variables
+
+Compi provides several built-in variables:
+
+- `$PWD`: Current working directory
+- `$ENV_*`: All environment variables prefixed with `ENV_` (e.g., `$ENV_HOME`, `$ENV_USER`)
+
+### Environment Variables
+
+Access environment variables using the `ENV_` prefix:
+
+```toml
+[variables]
+HOME_DIR = "${ENV_HOME}"
+USER_NAME = "${ENV_USER}"
+
+[task.deploy]
+command = "scp app ${ENV_USER}@server:/home/${ENV_USER}/bin/"
 ```
 
 ## Task Fields
@@ -170,6 +221,7 @@ Input files support standard glob patterns:
 
 - Stores file content hashes to detect changes
 - Configurable location via `cache_dir` in config
+- Cache location is relative to the config file
 
 ## Error Handling
 

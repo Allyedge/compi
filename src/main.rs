@@ -35,7 +35,7 @@ fn main() {
 
     show_task_relationships(&tasks, cli.verbose);
 
-    let mut cache = load_cache(cache_dir.as_deref());
+    let mut cache = load_cache(cache_dir.as_deref(), &cli.file);
     let mut cache_changed = false;
 
     let mut task_map: HashMap<String, &Task> = HashMap::new();
@@ -68,7 +68,7 @@ fn main() {
     }
 
     if cache_changed {
-        save_cache(&cache, cache_dir.as_deref());
+        save_cache(&cache, cache_dir.as_deref(), &cli.file);
     } else if cli.verbose {
         println!("No changes detected, cache not saved.");
     }
