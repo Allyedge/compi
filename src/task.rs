@@ -163,6 +163,9 @@ fn validate_tasks(tasks: &[Task]) -> Result<(), String> {
 
     for task in tasks {
         for dep_id in &task.dependencies {
+            if dep_id == &task.id {
+                return Err(format!("Task '{}' depends on itself", task.id));
+            }
             if !task_map.contains_key(dep_id) {
                 return Err(format!(
                     "Task '{}' depends on '{}' which doesn't exist",

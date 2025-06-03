@@ -53,7 +53,12 @@ pub fn expand_globs(paths: &[PathBuf]) -> Result<Vec<PathBuf>, FileError> {
         let path_str = path.to_string_lossy();
 
         if is_glob_pattern(&path_str) {
-            expand_single_glob(&path_str, &mut result, &mut seen)?;
+            let expanded_paths = expand_single_glob(&path_str)?;
+            for expanded_path in expanded_paths {
+                if expanded_path.is_file() && seen.insert(expanded_path.clone()) {
+                    result.push(expanded_path);
+                }
+            }
         } else {
             add_if_exists(path, &mut result, &mut seen);
         }
@@ -66,21 +71,15 @@ fn is_glob_pattern(path: &str) -> bool {
     path.contains('*') || path.contains('?') || path.contains('[')
 }
 
-fn expand_single_glob(
-    pattern: &str,
-    result: &mut Vec<PathBuf>,
-    seen: &mut HashSet<PathBuf>,
-) -> Result<(), FileError> {
+fn expand_single_glob(pattern: &str) -> Result<Vec<PathBuf>, FileError> {
     let glob_paths = glob(pattern)?;
 
+    let mut result = Vec::new();
     for entry in glob_paths {
-        let expanded_path = entry?;
-        if expanded_path.is_file() && seen.insert(expanded_path.clone()) {
-            result.push(expanded_path);
-        }
+        result.push(entry?);
     }
 
-    Ok(())
+    Ok(result)
 }
 
 fn add_if_exists(path: &Path, result: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>) {
