@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque, hash_map::Entry::Occupied},
-    fs,
+    env, fs,
     path::{Path, PathBuf},
     process,
 };
@@ -25,6 +25,8 @@ struct Config {
     #[serde(rename = "task")]
     tasks: HashMap<String, Task>,
     config: Option<ConfigSection>,
+    #[serde(default)]
+    variables: HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -47,6 +49,9 @@ pub fn load_tasks(config_path: &str) -> (Vec<Task>, Option<String>, Option<Strin
     let default_task = config.config.as_ref().and_then(|c| c.default.clone());
     let cache_dir = config.config.as_ref().and_then(|c| c.cache_dir.clone());
 
+    let mut variables = config.variables.clone();
+    add_builtin_variables(&mut variables);
+
     let tasks: Vec<Task> = config
         .tasks
         .into_iter()
@@ -54,6 +59,7 @@ pub fn load_tasks(config_path: &str) -> (Vec<Task>, Option<String>, Option<Strin
             if task.id.is_empty() {
                 task.id = name;
             }
+            substitute_variables_in_task(&mut task, &variables);
             task
         })
         .collect();
@@ -64,6 +70,45 @@ pub fn load_tasks(config_path: &str) -> (Vec<Task>, Option<String>, Option<Strin
     });
 
     (tasks, default_task, cache_dir)
+}
+
+fn add_builtin_variables(variables: &mut HashMap<String, String>) {
+    for (key, value) in env::vars() {
+        variables.insert(format!("ENV_{}", key), value);
+    }
+
+    if let Ok(pwd) = env::current_dir() {
+        variables.insert("PWD".to_string(), pwd.to_string_lossy().to_string());
+    }
+}
+
+fn substitute_variables_in_task(task: &mut Task, variables: &HashMap<String, String>) {
+    task.command = substitute_variables(&task.command, variables);
+
+    task.inputs = task
+        .inputs
+        .iter()
+        .map(|path| PathBuf::from(substitute_variables(&path.to_string_lossy(), variables)))
+        .collect();
+
+    task.outputs = task
+        .outputs
+        .iter()
+        .map(|path| PathBuf::from(substitute_variables(&path.to_string_lossy(), variables)))
+        .collect();
+}
+
+fn substitute_variables(text: &str, variables: &HashMap<String, String>) -> String {
+    let mut result = text.to_string();
+
+    for (key, value) in variables {
+        let pattern1 = format!("${{{}}}", key);
+        let pattern2 = format!("${}", key);
+        result = result.replace(&pattern1, value);
+        result = result.replace(&pattern2, value);
+    }
+
+    result
 }
 
 pub fn sort_topologically(tasks: &[Task]) -> Vec<String> {
