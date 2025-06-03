@@ -69,6 +69,12 @@ compi -f my-config.toml
 # Verbose output
 compi -v build
 
+# Remove outputs after successful execution
+compi --rm build
+
+# Combine flags
+compi --rm -v test
+
 # Show help
 compi --help
 ```
@@ -77,6 +83,7 @@ compi --help
 
 - `-f, --file <FILE>`: Configuration file (default: `compi.toml`)
 - `-v, --verbose`: Enable verbose output
+- `--rm`: Remove outputs after successful task execution
 - `TASK`: Task to run
 
 ## Configuration Format
@@ -95,6 +102,7 @@ command = "shell command"   # Command to execute
 dependencies = ["dep1"]     # Tasks that must run before this one
 inputs = ["src/*.rs"]       # Input files
 outputs = ["target/app"]    # Output files
+auto_remove = false         # Automatically remove outputs after successful execution
 ```
 
 ### Example Configuration
@@ -193,6 +201,7 @@ command = "scp app ${ENV_USER}@server:/home/${ENV_USER}/bin/"
 - `dependencies`: Array of task names that must run first
 - `inputs`: Array of input files/patterns (supports globs)
 - `outputs`: Array of output files this task produces
+- `auto_remove`: Automatically remove outputs after successful execution (default: `false`)
 
 ## Build Logic
 
@@ -216,6 +225,44 @@ Input files support standard glob patterns:
 - Tasks run in topological order based on dependencies
 - Circular dependencies are detected and reported as errors
 - Missing dependencies cause build failure
+
+## Output Cleanup
+
+Compi provides two ways to automatically clean up outputs after successful task execution:
+
+### CLI Flag
+
+Use the `--rm` flag to remove outputs after running a task:
+
+```bash
+# Remove outputs after building
+compi --rm build
+
+# Remove outputs with verbose logging
+compi --rm -v test
+```
+
+### Auto-Remove Field
+
+Set `auto_remove = true` in task configuration for automatic cleanup:
+
+```toml
+[task.temp_build]
+command = "gcc -o temp_app *.c"
+outputs = ["temp_app", "*.o"]
+auto_remove = true  # Always clean up after successful execution
+
+[task.generate_docs]
+command = "doxygen"
+outputs = ["docs/"]
+# Only removed if --rm flag is used
+```
+
+### Behavior
+
+- **Only on success**: Outputs are only removed if the task exits with code 0
+- **Glob expansion**: Patterns like `*.o` are expanded to actual files before removal
+- **Safe deletion**: Only the files/directories explicitly listed in outputs are deleted
 
 ## Cache System
 
@@ -272,6 +319,36 @@ outputs = ["dist/style.css"]
 [task.all]
 dependencies = ["js", "css"]
 command = "echo 'Build complete'"
+```
+
+### Build with Cleanup
+
+```toml
+[config]
+default = "package"
+
+[task.compile]
+command = "gcc *.c -o app"
+inputs = ["*.c", "*.h"]
+outputs = ["app", "*.o"]
+
+[task.test]
+command = "./app --test > test.log"
+dependencies = ["compile"]
+inputs = ["app"]
+outputs = ["test.log"]
+auto_remove = true  # Always clean up test logs
+
+[task.package]
+command = "tar -czf app.tar.gz app"
+dependencies = ["test"]
+inputs = ["app"]
+outputs = ["app.tar.gz"]
+
+# Usage:
+# compi --rm compile  # Removes app and *.o files after compilation
+# compi test          # Automatically removes test.log (auto_remove = true)
+# compi package       # Keeps app.tar.gz (no cleanup)
 ```
 
 ## License
