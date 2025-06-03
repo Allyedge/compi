@@ -1,0 +1,24 @@
+[package]
+name = "compi"
+version = "0.1.0"
+edition = "2024"
+description = "A build system written in Rust."
+authors = ["Allyedge"]
+license = "MIT"
+repository = "https://github.com/allyedge/compi"
+homepage = "https://github.com/Allyedge/compi"
+readme = "README.md"
+keywords = ["build", "build-system", "automation", "task-runner", "cli"]
+categories = ["command-line-interface", "command-line-utilities", "development-tools::build-utils"]
+
+[[bin]]
+name = "compi"
+path = "src/main.rs"
+
+[dependencies]
+blake3 = "1.8.2"
+clap = { version = "4.5.39", features = ["derive"] }
+glob = "0.3.2"
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+toml = "0.8.22"

@@ -1,0 +1,27 @@
+[config]
+default = "build"
+
+[task.format]
+command = "cargo fmt --all"
+inputs = ["src/**/*.rs"]
+outputs = ["src/**/*.rs"]
+
+[task.clippy]
+command = "cargo clippy --all-targets --all-features -- -D warnings"
+dependencies = ["format"]
+inputs = ["src/**/*.rs"]
+outputs = ["src/**/*.rs"]
+
+[task.build]
+command = "cargo build"
+dependencies = ["clippy"]
+inputs = ["src/**/*.rs", "Cargo.toml"]
+outputs = ["target/debug/compi"]
+
+[task.test]
+command = "cargo test"
+dependencies = ["build"]
+inputs = ["src/**/*.rs", "target/debug/compi"]
+
+[task.clean]
+command = "rm -rf target/"
