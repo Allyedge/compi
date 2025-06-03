@@ -18,8 +18,8 @@ impl Cache {
         self.0.contains_key(key)
     }
 
-    pub fn insert(&mut self, key: String) {
-        self.0.insert(key, ());
+    pub fn insert(&mut self, key: String) -> bool {
+        self.0.insert(key, ()).is_none()
     }
 }
 

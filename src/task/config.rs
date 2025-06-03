@@ -1,4 +1,5 @@
 use super::Task;
+use regex::Regex;
 use serde::Deserialize;
 use std::{collections::HashMap, env, fs, path::PathBuf, process};
 
@@ -104,14 +105,28 @@ fn substitute_variables_in_task(task: &mut Task, variables: &HashMap<String, Str
 }
 
 fn substitute_variables(text: &str, variables: &HashMap<String, String>) -> String {
-    let mut result = text.to_string();
+    let braced_regex = Regex::new(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}").unwrap();
+    let simple_regex = Regex::new(r"\$([A-Za-z_][A-Za-z0-9_]*)\b").unwrap();
 
-    for (key, value) in variables {
-        let pattern1 = format!("${{{}}}", key);
-        let pattern2 = format!("${}", key);
-        result = result.replace(&pattern1, value);
-        result = result.replace(&pattern2, value);
-    }
+    let mut result = braced_regex
+        .replace_all(text, |caps: &regex::Captures| {
+            let var_name = &caps[1];
+            variables
+                .get(var_name)
+                .cloned()
+                .unwrap_or_else(|| caps[0].to_string())
+        })
+        .to_string();
+
+    result = simple_regex
+        .replace_all(&result, |caps: &regex::Captures| {
+            let var_name = &caps[1];
+            variables
+                .get(var_name)
+                .cloned()
+                .unwrap_or_else(|| caps[0].to_string())
+        })
+        .to_string();
 
     result
 }

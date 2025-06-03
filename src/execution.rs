@@ -23,6 +23,8 @@ impl<'a> TaskRunner<'a> {
     }
 
     pub fn run_tasks(&mut self, task_ids: &[String]) -> bool {
+        let mut any_cache_updated = false;
+
         for task_id in task_ids {
             let task = match self.tasks.iter().find(|t| &t.id == task_id) {
                 Some(task) => task,
@@ -37,13 +39,18 @@ impl<'a> TaskRunner<'a> {
                     println!("Running task: {}", task.id);
                 }
 
-                if !self.execute_task(task) {
-                    return false;
+                match self.execute_task(task) {
+                    Ok(cache_updated) => {
+                        if cache_updated {
+                            any_cache_updated = true;
+                        }
+                    }
+                    Err(_) => return false,
                 }
             }
         }
 
-        true
+        any_cache_updated
     }
 
     fn should_run_task(&self, task: &Task) -> bool {
@@ -93,14 +100,17 @@ impl<'a> TaskRunner<'a> {
         false
     }
 
-    fn execute_task(&mut self, task: &Task) -> bool {
+    fn execute_task(&mut self, task: &Task) -> Result<bool, ()> {
         match run_command(&task.command) {
             Ok(status) if status.success() => {
-                if !task.inputs.is_empty() {
-                    if let Ok(hash) = hash_files(task.inputs.clone()) {
-                        self.cache.insert(hash.to_hex().to_string());
+                let cache_updated = if !task.inputs.is_empty() {
+                    match hash_files(task.inputs.clone()) {
+                        Ok(hash) => self.cache.insert(hash.to_hex().to_string()),
+                        Err(_) => false,
                     }
-                }
+                } else {
+                    false
+                };
 
                 if (self.rm || task.auto_remove) && !task.outputs.is_empty() {
                     if let Err(e) = cleanup_outputs(&task.outputs, self.verbose) {
@@ -108,15 +118,15 @@ impl<'a> TaskRunner<'a> {
                     }
                 }
 
-                true
+                Ok(cache_updated)
             }
             Ok(status) => {
                 eprintln!("Error: Task '{}' failed with status: {}", task.id, status);
-                false
+                Err(())
             }
             Err(e) => {
                 eprintln!("Error: Task '{}' failed to execute: {}", task.id, e);
-                false
+                Err(())
             }
         }
     }
