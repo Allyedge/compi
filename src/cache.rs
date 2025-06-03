@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     fs::{self, File},
-    io::BufReader,
+    io::{BufReader, BufWriter},
     path::{Path, PathBuf},
 };
 
@@ -38,7 +38,7 @@ pub fn load_cache(cache_dir: Option<&str>, config_path: &str) -> Cache {
 pub fn save_cache(cache: &Cache, cache_dir: Option<&str>, config_path: &str) {
     let cache_path = get_cache_path(cache_dir, config_path);
 
-    if let Some(parent) = Path::new(&cache_path).parent() {
+    if let Some(parent) = cache_path.parent() {
         if let Err(e) = fs::create_dir_all(parent) {
             eprintln!("Warning: Failed to create cache directory: {}", e);
             return;
@@ -47,7 +47,8 @@ pub fn save_cache(cache: &Cache, cache_dir: Option<&str>, config_path: &str) {
 
     match File::create(&cache_path) {
         Ok(file) => {
-            if let Err(e) = serde_json::to_writer_pretty(file, cache) {
+            let writer = BufWriter::new(file);
+            if let Err(e) = serde_json::to_writer_pretty(writer, cache) {
                 eprintln!("Warning: Failed to write cache file: {}", e);
             }
         }

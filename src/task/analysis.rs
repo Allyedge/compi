@@ -1,0 +1,215 @@
+use super::Task;
+use std::{
+    collections::{HashMap, HashSet, VecDeque, hash_map::Entry::Occupied},
+    path::Path,
+};
+
+pub fn sort_topologically(tasks: &[Task]) -> Vec<String> {
+    let mut in_degrees: HashMap<&str, usize> = HashMap::new();
+
+    for task in tasks {
+        in_degrees.insert(&task.id, task.dependencies.len());
+    }
+
+    let mut queue: VecDeque<&str> = VecDeque::new();
+    for (task_id, &in_degree) in &in_degrees {
+        if in_degree == 0 {
+            queue.push_back(task_id);
+        }
+    }
+
+    let mut sorted_tasks: Vec<String> = Vec::new();
+
+    while let Some(task_id) = queue.pop_front() {
+        sorted_tasks.push(task_id.to_string());
+
+        for dependent in tasks {
+            if !dependent.dependencies.iter().any(|dep| dep == task_id) {
+                continue;
+            }
+
+            let entry = in_degrees.entry(&dependent.id).and_modify(|c| *c -= 1);
+
+            if let Occupied(entry) = entry {
+                if *entry.get() == 0 {
+                    queue.push_back(&dependent.id);
+                }
+            }
+        }
+    }
+
+    sorted_tasks
+}
+
+pub fn validate_tasks(tasks: &[Task]) -> Result<(), String> {
+    let task_ids: HashSet<&str> = tasks.iter().map(|t| t.id.as_str()).collect();
+
+    for task in tasks {
+        for dep_id in &task.dependencies {
+            if dep_id == &task.id {
+                return Err(format!("Task '{}' depends on itself", task.id));
+            }
+            if !task_ids.contains(dep_id.as_str()) {
+                return Err(format!(
+                    "Task '{}' depends on '{}' which doesn't exist",
+                    task.id, dep_id
+                ));
+            }
+        }
+    }
+
+    detect_cycles(tasks)?;
+    Ok(())
+}
+
+fn detect_cycles(tasks: &[Task]) -> Result<(), String> {
+    let task_map: HashMap<&str, &Task> = tasks.iter().map(|t| (t.id.as_str(), t)).collect();
+
+    for task in tasks {
+        let mut visited = HashSet::new();
+        let mut path = Vec::new();
+
+        if has_cycle(&task.id, &task_map, &mut visited, &mut path) {
+            path.push(task.id.clone());
+            return Err(format!("Circular dependency: {}", path.join(" -> ")));
+        }
+    }
+
+    Ok(())
+}
+
+fn has_cycle(
+    task_id: &str,
+    task_map: &HashMap<&str, &Task>,
+    visited: &mut HashSet<String>,
+    path: &mut Vec<String>,
+) -> bool {
+    if path.iter().any(|id| id == task_id) {
+        return true;
+    }
+
+    if visited.contains(task_id) {
+        return false;
+    }
+
+    visited.insert(task_id.to_string());
+    path.push(task_id.to_string());
+
+    if let Some(task) = task_map.get(task_id) {
+        for dep in &task.dependencies {
+            if has_cycle(dep, task_map, visited, path) {
+                return true;
+            }
+        }
+    }
+
+    path.pop();
+    false
+}
+
+pub fn show_task_relationships(tasks: &[Task], verbose: bool) {
+    if !verbose {
+        return;
+    }
+
+    let task_map: HashMap<&str, &Task> = tasks.iter().map(|t| (t.id.as_str(), t)).collect();
+
+    for task in tasks {
+        for dep_id in &task.dependencies {
+            if let Some(dep_task) = task_map.get(dep_id.as_str()) {
+                if !has_file_relationship(task, dep_task) {
+                    println!(
+                        "Info: Task '{}' depends on '{}' for ordering only",
+                        task.id, dep_id
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn has_file_relationship(task: &Task, dependency: &Task) -> bool {
+    if dependency.outputs.is_empty() || task.inputs.is_empty() {
+        return false;
+    }
+
+    for dep_output in &dependency.outputs {
+        for task_input in &task.inputs {
+            if paths_match(dep_output, task_input) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+fn paths_match(output: &Path, input: &Path) -> bool {
+    let output_str = output.to_string_lossy();
+    let input_str = input.to_string_lossy();
+
+    if output_str == input_str {
+        return true;
+    }
+
+    if is_glob_pattern(&input_str) {
+        if let Ok(glob_paths) = glob::glob(&input_str) {
+            for entry in glob_paths.flatten() {
+                if entry == *output {
+                    return true;
+                }
+            }
+        }
+    }
+
+    if input_str.contains("**") {
+        if let Some(prefix) = input_str.split("**").next() {
+            if !prefix.is_empty() && output_str.starts_with(prefix) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
+fn is_glob_pattern(path: &str) -> bool {
+    path.contains('*') || path.contains('?') || path.contains('[')
+}
+
+pub fn get_required_tasks(tasks: &[Task], target_task_id: &str) -> Result<Vec<String>, String> {
+    let task_map: HashMap<&str, &Task> = tasks.iter().map(|t| (t.id.as_str(), t)).collect();
+
+    if !task_map.contains_key(target_task_id) {
+        return Err(format!("Task '{}' not found", target_task_id));
+    }
+
+    let mut needed_tasks = HashSet::new();
+    let mut queue = VecDeque::new();
+
+    queue.push_back(target_task_id);
+
+    while let Some(current_task_id) = queue.pop_front() {
+        if needed_tasks.contains(current_task_id) {
+            continue;
+        }
+
+        needed_tasks.insert(current_task_id);
+
+        if let Some(task) = task_map.get(current_task_id) {
+            for dep in &task.dependencies {
+                if !needed_tasks.contains(dep.as_str()) {
+                    queue.push_back(dep);
+                }
+            }
+        }
+    }
+
+    let filtered_tasks: Vec<Task> = tasks
+        .iter()
+        .filter(|task| needed_tasks.contains(task.id.as_str()))
+        .cloned()
+        .collect();
+
+    Ok(sort_topologically(&filtered_tasks))
+}

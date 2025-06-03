@@ -1,5 +1,9 @@
 # Compi
 
+![GitHub License](https://img.shields.io/github/license/allyedge/compi)
+
+![Crates.io Total Downloads](https://img.shields.io/crates/d/compi)
+
 A build system written in Rust.
 
 ## Features

@@ -27,6 +27,16 @@ impl fmt::Display for FileError {
     }
 }
 
+impl std::error::Error for FileError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            FileError::GlobPattern(e) => Some(e),
+            FileError::GlobExpansion(e) => Some(e),
+            FileError::Io(e) => Some(e),
+        }
+    }
+}
+
 impl From<PatternError> for FileError {
     fn from(err: PatternError) -> Self {
         FileError::GlobPattern(err)
@@ -73,13 +83,9 @@ fn is_glob_pattern(path: &str) -> bool {
 
 fn expand_single_glob(pattern: &str) -> Result<Vec<PathBuf>, FileError> {
     let glob_paths = glob(pattern)?;
-
-    let mut result = Vec::new();
-    for entry in glob_paths {
-        result.push(entry?);
-    }
-
-    Ok(result)
+    glob_paths
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(FileError::from)
 }
 
 fn add_if_exists(path: &Path, result: &mut Vec<PathBuf>, seen: &mut HashSet<PathBuf>) {
@@ -91,18 +97,7 @@ fn add_if_exists(path: &Path, result: &mut Vec<PathBuf>, seen: &mut HashSet<Path
 }
 
 pub fn hash_files(inputs: Vec<PathBuf>) -> Result<Hash, FileError> {
-    let expanded_files = match expand_globs(&inputs) {
-        Ok(files) => files,
-        Err(FileError::GlobPattern(e)) => {
-            eprintln!("Error: Invalid glob pattern: {}", e);
-            return Err(FileError::GlobPattern(e));
-        }
-        Err(FileError::GlobExpansion(e)) => {
-            eprintln!("Error: Failed to expand glob pattern: {}", e);
-            return Err(FileError::GlobExpansion(e));
-        }
-        Err(e) => return Err(e),
-    };
+    let expanded_files = expand_globs(&inputs)?;
 
     if expanded_files.is_empty() {
         return Ok(blake3::hash(b""));
@@ -111,10 +106,10 @@ pub fn hash_files(inputs: Vec<PathBuf>) -> Result<Hash, FileError> {
     let mut sorted_files = expanded_files;
     sorted_files.sort();
 
-    let mut hashes: Vec<Hash> = Vec::new();
+    let mut hashes = Vec::new();
 
-    for file_path in sorted_files {
-        match fs::read(&file_path) {
+    for file_path in &sorted_files {
+        match fs::read(file_path) {
             Ok(contents) => {
                 let path_str = file_path.to_string_lossy();
                 let combined = format!("{}:{}", path_str.len(), path_str);
@@ -138,7 +133,7 @@ pub fn hash_files(inputs: Vec<PathBuf>) -> Result<Hash, FileError> {
     }
 
     let mut combined_hash_data = Vec::new();
-    for hash in hashes {
+    for hash in &hashes {
         combined_hash_data.extend_from_slice(hash.as_bytes());
     }
 
@@ -166,12 +161,12 @@ pub fn cleanup_outputs(outputs: &[PathBuf], verbose: bool) -> Result<(), FileErr
 
     let expanded_outputs = expand_globs(outputs)?;
 
-    for output_path in expanded_outputs {
+    for output_path in &expanded_outputs {
         if output_path.exists() {
             let result = if output_path.is_dir() {
-                fs::remove_dir_all(&output_path)
+                fs::remove_dir_all(output_path)
             } else {
-                fs::remove_file(&output_path)
+                fs::remove_file(output_path)
             };
 
             match result {
