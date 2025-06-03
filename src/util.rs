@@ -159,3 +159,38 @@ pub fn run_command(command: &str) -> Result<ExitStatus, Error> {
 
     cmd.status()
 }
+
+pub fn cleanup_outputs(outputs: &[PathBuf], verbose: bool) -> Result<(), FileError> {
+    if outputs.is_empty() {
+        return Ok(());
+    }
+
+    let expanded_outputs = expand_globs(outputs)?;
+
+    for output_path in expanded_outputs {
+        if output_path.exists() {
+            let result = if output_path.is_dir() {
+                fs::remove_dir_all(&output_path)
+            } else {
+                fs::remove_file(&output_path)
+            };
+
+            match result {
+                Ok(()) => {
+                    if verbose {
+                        println!("Removed: {}", output_path.display());
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "Warning: Failed to remove '{}': {}",
+                        output_path.display(),
+                        e
+                    );
+                }
+            }
+        }
+    }
+
+    Ok(())
+}

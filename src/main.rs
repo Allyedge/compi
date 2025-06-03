@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process;
 use std::time::SystemTime;
-use util::{expand_globs, hash_files, run_command};
+use util::{cleanup_outputs, expand_globs, hash_files, run_command};
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -23,6 +23,10 @@ struct Cli {
     /// Enable verbose output
     #[arg(short = 'v', long = "verbose")]
     verbose: bool,
+
+    /// Remove outputs after successful task execution
+    #[arg(long = "rm")]
+    rm: bool,
 
     /// Task to run
     task: Option<String>,
@@ -59,7 +63,7 @@ fn main() {
                 println!("Running task: {}", task.id);
             }
 
-            if execute_task(task, &mut cache) {
+            if execute_task(task, &mut cache, cli.rm, cli.verbose) {
                 cache_changed = true;
             } else {
                 break;
@@ -206,7 +210,7 @@ fn oldest_timestamp(paths: &[PathBuf]) -> Option<SystemTime> {
     oldest
 }
 
-fn execute_task(task: &Task, cache: &mut cache::Cache) -> bool {
+fn execute_task(task: &Task, cache: &mut cache::Cache, rm: bool, verbose: bool) -> bool {
     match run_command(&task.command) {
         Ok(status) if status.success() => {
             if !task.inputs.is_empty() {
@@ -214,6 +218,13 @@ fn execute_task(task: &Task, cache: &mut cache::Cache) -> bool {
                     cache.insert(hash.to_hex().to_string());
                 }
             }
+
+            if (rm || task.auto_remove) && !task.outputs.is_empty() {
+                if let Err(e) = cleanup_outputs(&task.outputs, verbose) {
+                    eprintln!("Warning: Cleanup failed for task '{}': {}", task.id, e);
+                }
+            }
+
             true
         }
         Ok(status) => {

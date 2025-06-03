@@ -18,6 +18,8 @@ pub struct Task {
     pub inputs: Vec<PathBuf>,
     #[serde(default)]
     pub outputs: Vec<PathBuf>,
+    #[serde(default)]
+    pub auto_remove: bool,
 }
 
 #[derive(Debug, Deserialize)]
