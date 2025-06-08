@@ -19,7 +19,9 @@ path = "src/main.rs"
 blake3 = "1.8.2"
 clap = { version = "4.5.39", features = ["derive"] }
 glob = "0.3.2"
+humantime = "2.2.0"
 regex = "1.11.1"
 serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
+tokio = { version = "1.45.1", features = ["full"] }
 toml = "0.8.22"

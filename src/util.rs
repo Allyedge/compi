@@ -1,20 +1,27 @@
-use blake3::Hash;
-use glob::{GlobError, PatternError, glob};
 use std::{
     collections::HashSet,
     fmt, fs,
+    io::Error as IoError,
     path::{Path, PathBuf},
+    process::ExitStatus,
+    time::Duration,
 };
-use std::{
-    io::Error,
-    process::{Command, ExitStatus},
-};
+
+use blake3::Hash;
+use glob::{GlobError, PatternError, glob};
+use tokio::process::Command as TokioCommand;
 
 #[derive(Debug)]
 pub enum FileError {
     GlobPattern(PatternError),
     GlobExpansion(GlobError),
-    Io(Error),
+    Io(IoError),
+}
+
+#[derive(Debug)]
+pub enum CommandError {
+    Io(IoError),
+    Timeout,
 }
 
 impl fmt::Display for FileError {
@@ -49,9 +56,47 @@ impl From<GlobError> for FileError {
     }
 }
 
-impl From<Error> for FileError {
-    fn from(err: Error) -> Self {
+impl From<IoError> for FileError {
+    fn from(err: IoError) -> Self {
         FileError::Io(err)
+    }
+}
+
+impl fmt::Display for CommandError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            CommandError::Io(e) => write!(f, "Command execution error: {}", e),
+            CommandError::Timeout => write!(f, "Command timed out"),
+        }
+    }
+}
+
+impl std::error::Error for CommandError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            CommandError::Io(e) => Some(e),
+            CommandError::Timeout => None,
+        }
+    }
+}
+
+pub fn parse_timeout(timeout_str: Option<&str>, default_timeout: Option<&str>) -> Option<Duration> {
+    let timeout_to_parse = timeout_str.or(default_timeout)?;
+
+    if timeout_to_parse == "0" || timeout_to_parse.is_empty() {
+        return None;
+    }
+
+    match timeout_to_parse.parse::<humantime::Duration>() {
+        Ok(duration) => Some(duration.into()),
+        Err(e) => {
+            eprintln!(
+                "Warning: Invalid timeout format '{}': {}",
+                timeout_to_parse, e
+            );
+            eprintln!("Use duration format like '5m', '30s', '1h30m'");
+            None
+        }
     }
 }
 
@@ -140,18 +185,34 @@ pub fn hash_files(inputs: Vec<PathBuf>) -> Result<Hash, FileError> {
     Ok(blake3::hash(&combined_hash_data))
 }
 
-pub fn run_command(command: &str) -> Result<ExitStatus, Error> {
+pub async fn run_command_with_timeout(
+    command: &str,
+    timeout: Option<Duration>,
+) -> Result<ExitStatus, CommandError> {
     let mut cmd = if cfg!(target_os = "windows") {
-        let mut c = Command::new("cmd");
+        let mut c = TokioCommand::new("cmd");
         c.args(["/C", command]);
         c
     } else {
-        let mut c = Command::new("sh");
+        let mut c = TokioCommand::new("sh");
         c.args(["-c", command]);
         c
     };
 
-    cmd.status()
+    let child = cmd.spawn().map_err(CommandError::Io)?;
+
+    match timeout {
+        Some(duration) => match tokio::time::timeout(duration, child.wait_with_output()).await {
+            Ok(Ok(output)) => Ok(output.status),
+            Ok(Err(e)) => Err(CommandError::Io(e)),
+            Err(_) => Err(CommandError::Timeout),
+        },
+        None => child
+            .wait_with_output()
+            .await
+            .map(|output| output.status)
+            .map_err(CommandError::Io),
+    }
 }
 
 pub fn cleanup_outputs(outputs: &[PathBuf], verbose: bool) -> Result<(), FileError> {

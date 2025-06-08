@@ -1,27 +1,14 @@
 use std::{
-    collections::HashMap,
+    collections::HashSet,
     fs::{self, File},
     io::{BufReader, BufWriter},
     path::{Path, PathBuf},
 };
 
-use serde::{Deserialize, Serialize};
-
 const DEFAULT_CACHE_DIR: &str = ".";
 const CACHE_FILENAME: &str = "compi_cache.json";
 
-#[derive(Debug, Serialize, Deserialize, Default)]
-pub struct Cache(HashMap<String, ()>);
-
-impl Cache {
-    pub fn contains_key(&self, key: &str) -> bool {
-        self.0.contains_key(key)
-    }
-
-    pub fn insert(&mut self, key: String) -> bool {
-        self.0.insert(key, ()).is_none()
-    }
-}
+pub type Cache = HashSet<String>;
 
 pub fn load_cache(cache_dir: Option<&str>, config_path: &str) -> Cache {
     let cache_path = get_cache_path(cache_dir, config_path);

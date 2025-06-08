@@ -8,9 +8,10 @@ A build system written in Rust.
 
 ## Features
 
-- **Clean TOML structure**: Compi uses a clean TOML structure to define tasks
-- **Safety**: Compi uses dependencies, inputs and outputs defined for the tasks to warn you of potential issues
-- **Dependencies**: By using dependencies, Compi allows for a clean representation of very complex command chains
+- **Clean TOML structure**: Compi uses a clean TOML structure to define tasks.
+- **Safety**: Compi uses dependencies, inputs and outputs defined for the tasks to warn you of potential issues.
+- **Dependencies**: By using dependencies, Compi allows for a clean representation of very complex command chains.
+- **Parallel execution**: Compi runs independent tasks concurrently for faster execution.
 
 ## Installation
 
@@ -76,8 +77,17 @@ compi -v build
 # Remove outputs after successful execution
 compi --rm build
 
+# Run with specific number of workers
+compi -j 8 build
+
+# Set task timeout and dry run
+compi -t 30s --dry-run test
+
+# Continue on failure with verbose output
+compi --continue-on-failure -v all
+
 # Combine flags
-compi --rm -v test
+compi --rm -v -j 2 test
 
 # Show help
 compi --help
@@ -88,6 +98,10 @@ compi --help
 - `-f, --file <FILE>`: Configuration file (default: `compi.toml`)
 - `-v, --verbose`: Enable verbose output
 - `--rm`: Remove outputs after successful task execution
+- `-j, --workers <N>`: Number of parallel workers (default: CPU cores)
+- `-t, --timeout <DURATION>`: Default timeout for tasks (e.g., "30s", "5m")
+- `--dry-run`: Show what would be executed without running tasks
+- `--continue-on-failure`: Continue running independent tasks when others fail
 - `TASK`: Task to run
 
 ## Configuration Format
@@ -100,6 +114,8 @@ Create a `compi.toml` file in your project root:
 [config]
 default = "build"           # Default task to run
 cache_dir = "cache"         # Cache directory
+workers = 4                 # Number of parallel workers (default: CPU cores)
+default_timeout = "5m"      # Default timeout for tasks
 
 [task.task_name]
 command = "shell command"   # Command to execute
@@ -107,6 +123,7 @@ dependencies = ["dep1"]     # Tasks that must run before this one
 inputs = ["src/*.rs"]       # Input files
 outputs = ["target/app"]    # Output files
 auto_remove = false         # Automatically remove outputs after successful execution
+timeout = "10m"             # Task-specific timeout (overrides default)
 ```
 
 ### Example Configuration
@@ -206,6 +223,7 @@ command = "scp app ${ENV_USER}@server:/home/${ENV_USER}/bin/"
 - `inputs`: Array of input files/patterns (supports globs)
 - `outputs`: Array of output files this task produces
 - `auto_remove`: Automatically remove outputs after successful execution (default: `false`)
+- `timeout`: Task timeout duration (e.g., "30s", "5m", "1h") - overrides default
 
 ## Build Logic
 
@@ -227,6 +245,7 @@ Input files support standard glob patterns:
 ## Dependency Management
 
 - Tasks run in topological order based on dependencies
+- Independent tasks can execute in parallel using configurable worker pools
 - Circular dependencies are detected and reported as errors
 - Missing dependencies cause build failure
 

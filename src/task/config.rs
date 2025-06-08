@@ -1,7 +1,10 @@
-use super::Task;
+use std::{collections::HashMap, env, fs, path::PathBuf};
+
 use regex::Regex;
 use serde::Deserialize;
-use std::{collections::HashMap, env, fs, path::PathBuf, process};
+
+use super::{Task, dependency::validate_tasks};
+use crate::error::Result;
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -16,6 +19,8 @@ struct Config {
 struct ConfigSection {
     default: Option<String>,
     cache_dir: Option<String>,
+    workers: Option<usize>,
+    default_timeout: Option<String>,
 }
 
 #[derive(Debug)]
@@ -23,33 +28,29 @@ pub struct TaskConfiguration {
     pub tasks: Vec<Task>,
     pub default_task: Option<String>,
     pub cache_dir: Option<String>,
+    pub workers: Option<usize>,
+    pub default_timeout: Option<String>,
 }
 
-pub fn load_tasks(config_path: &str) -> (Vec<Task>, Option<String>, Option<String>) {
-    let config = load_and_parse_config(config_path);
-    let task_config = process_config(config);
-    (
-        task_config.tasks,
-        task_config.default_task,
-        task_config.cache_dir,
-    )
+pub fn load_tasks(config_path: &str) -> Result<TaskConfiguration> {
+    let config = load_and_parse_config(config_path)?;
+    process_config(config)
 }
 
-fn load_and_parse_config(config_path: &str) -> Config {
-    let contents = fs::read_to_string(config_path).unwrap_or_else(|e| {
-        eprintln!("Error reading {}: {}", config_path, e);
-        process::exit(1);
-    });
-
-    toml::from_str(&contents).unwrap_or_else(|e| {
-        eprintln!("Error parsing {}: {}", config_path, e);
-        process::exit(1);
-    })
+fn load_and_parse_config(config_path: &str) -> Result<Config> {
+    let contents = fs::read_to_string(config_path)?;
+    let config = toml::from_str(&contents)?;
+    Ok(config)
 }
 
-fn process_config(config: Config) -> TaskConfiguration {
+fn process_config(config: Config) -> Result<TaskConfiguration> {
     let default_task = config.config.as_ref().and_then(|c| c.default.clone());
     let cache_dir = config.config.as_ref().and_then(|c| c.cache_dir.clone());
+    let workers = config.config.as_ref().and_then(|c| c.workers);
+    let default_timeout = config
+        .config
+        .as_ref()
+        .and_then(|c| c.default_timeout.clone());
 
     let mut variables = config.variables;
     add_builtin_variables(&mut variables);
@@ -66,16 +67,15 @@ fn process_config(config: Config) -> TaskConfiguration {
         })
         .collect();
 
-    super::analysis::validate_tasks(&tasks).unwrap_or_else(|e| {
-        eprintln!("Error: {}", e);
-        process::exit(1);
-    });
+    validate_tasks(&tasks)?;
 
-    TaskConfiguration {
+    Ok(TaskConfiguration {
         tasks,
         default_task,
         cache_dir,
-    }
+        workers,
+        default_timeout,
+    })
 }
 
 fn add_builtin_variables(variables: &mut HashMap<String, String>) {
