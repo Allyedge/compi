@@ -1,14 +1,14 @@
+use blake3::Hash;
+use glob::{GlobError, PatternError, glob};
+use std::process::{Output, Stdio};
 use std::{
     collections::HashSet,
     fmt, fs,
     io::Error as IoError,
     path::{Path, PathBuf},
-    process::ExitStatus,
     time::Duration,
 };
-
-use blake3::Hash;
-use glob::{GlobError, PatternError, glob};
+use tokio::io::AsyncReadExt;
 use tokio::process::Command as TokioCommand;
 
 #[derive(Debug)]
@@ -188,7 +188,7 @@ pub fn hash_files(inputs: Vec<PathBuf>) -> Result<Hash, FileError> {
 pub async fn run_command_with_timeout(
     command: &str,
     timeout: Option<Duration>,
-) -> Result<ExitStatus, CommandError> {
+) -> Result<std::process::Output, CommandError> {
     let mut cmd = if cfg!(target_os = "windows") {
         let mut c = TokioCommand::new("cmd");
         c.args(["/C", command]);
@@ -199,19 +199,45 @@ pub async fn run_command_with_timeout(
         c
     };
 
-    let child = cmd.spawn().map_err(CommandError::Io)?;
+    cmd.stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null());
+
+    let mut child = cmd.spawn().map_err(CommandError::Io)?;
 
     match timeout {
-        Some(duration) => match tokio::time::timeout(duration, child.wait_with_output()).await {
-            Ok(Ok(output)) => Ok(output.status),
-            Ok(Err(e)) => Err(CommandError::Io(e)),
-            Err(_) => Err(CommandError::Timeout),
-        },
-        None => child
-            .wait_with_output()
-            .await
-            .map(|output| output.status)
-            .map_err(CommandError::Io),
+        Some(duration) => {
+            tokio::select! {
+                result = child.wait() => {
+                    let status = result.map_err(CommandError::Io)?;
+
+                    let mut stdout = Vec::new();
+                    let mut stderr = Vec::new();
+
+                    if let Some(mut stdout_pipe) = child.stdout.take() {
+                        stdout_pipe.read_to_end(&mut stdout).await.map_err(CommandError::Io)?;
+                    }
+
+                    if let Some(mut stderr_pipe) = child.stderr.take() {
+                        stderr_pipe.read_to_end(&mut stderr).await.map_err(CommandError::Io)?;
+                    }
+
+                    Ok(Output {
+                        status,
+                        stdout,
+                        stderr,
+                    })
+                }
+                _ = tokio::time::sleep(duration) => {
+                    if let Err(kill_err) = child.kill().await {
+                        eprintln!("Warning: Failed to kill timed-out process: {}", kill_err);
+                    }
+                    let _ = child.wait().await;
+                    Err(CommandError::Timeout)
+                }
+            }
+        }
+        None => child.wait_with_output().await.map_err(CommandError::Io),
     }
 }
 

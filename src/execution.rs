@@ -1,8 +1,15 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc, thread, time::SystemTime};
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    sync::Arc,
+    thread,
+    time::SystemTime,
+};
 use tokio::sync::Semaphore;
 
 use crate::{
     cache,
+    error::CompiError,
     task::Task,
     util::{
         CommandError, cleanup_outputs, expand_globs, hash_files, parse_timeout,
@@ -22,12 +29,13 @@ pub struct ExecutionLevel {
     pub task_ids: Vec<String>,
 }
 
-pub fn calculate_dependency_levels(tasks: &[Task]) -> Vec<ExecutionLevel> {
+pub fn calculate_dependency_levels(tasks: &[Task]) -> Result<Vec<ExecutionLevel>, CompiError> {
     let task_map: HashMap<&str, &Task> = tasks.iter().map(|t| (t.id.as_str(), t)).collect();
     let mut levels: HashMap<String, usize> = HashMap::new();
 
     for task in tasks {
-        calculate_task_level(&task.id, &task_map, &mut levels);
+        let mut visited = HashSet::new();
+        calculate_task_level(&task.id, &task_map, &mut levels, &mut visited)?;
     }
 
     let mut level_groups: HashMap<usize, Vec<String>> = HashMap::new();
@@ -41,41 +49,52 @@ pub fn calculate_dependency_levels(tasks: &[Task]) -> Vec<ExecutionLevel> {
         .collect();
 
     execution_levels.sort_by_key(|el| el.level);
-    execution_levels
+    Ok(execution_levels)
 }
 
 fn calculate_task_level(
     task_id: &str,
     task_map: &HashMap<&str, &Task>,
     levels: &mut HashMap<String, usize>,
-) -> usize {
+    visited: &mut HashSet<String>,
+) -> Result<usize, CompiError> {
     if let Some(&level) = levels.get(task_id) {
-        return level;
+        return Ok(level);
+    }
+
+    if visited.contains(task_id) {
+        return Err(CompiError::Dependency(format!(
+            "Circular dependency detected involving task '{}'",
+            task_id
+        )));
     }
 
     let task = match task_map.get(task_id) {
         Some(task) => task,
         None => {
             levels.insert(task_id.to_string(), 0);
-            return 0;
+            return Ok(0);
         }
     };
 
     if task.dependencies.is_empty() {
         levels.insert(task_id.to_string(), 0);
-        return 0;
+        return Ok(0);
     }
 
-    let max_dep_level = task
-        .dependencies
-        .iter()
-        .map(|dep| calculate_task_level(dep, task_map, levels))
-        .max()
-        .unwrap_or(0);
+    visited.insert(task_id.to_string());
+
+    let mut max_dep_level = 0;
+    for dep in &task.dependencies {
+        let dep_level = calculate_task_level(dep, task_map, levels, visited)?;
+        max_dep_level = max_dep_level.max(dep_level);
+    }
+
+    visited.remove(task_id);
 
     let level = max_dep_level + 1;
     levels.insert(task_id.to_string(), level);
-    level
+    Ok(level)
 }
 
 pub struct TaskRunner<'a> {
@@ -121,7 +140,13 @@ impl<'a> TaskRunner<'a> {
             return false;
         }
 
-        let execution_levels = calculate_dependency_levels(&tasks_to_run);
+        let execution_levels = match calculate_dependency_levels(&tasks_to_run) {
+            Ok(levels) => levels,
+            Err(e) => {
+                eprintln!("Error calculating dependency levels: {}", e);
+                return false;
+            }
+        };
 
         if self.verbose {
             println!(
@@ -255,7 +280,7 @@ impl<'a> TaskRunner<'a> {
         let timeout = parse_timeout(task.timeout.as_deref(), default_timeout.as_deref());
 
         match run_command_with_timeout(&task.command, timeout).await {
-            Ok(status) if status.success() => {
+            Ok(output) if output.status.success() => {
                 let cache_updated = !task.inputs.is_empty();
 
                 if (rm || task.auto_remove) && !task.outputs.is_empty() {
@@ -266,8 +291,14 @@ impl<'a> TaskRunner<'a> {
 
                 Ok(cache_updated)
             }
-            Ok(status) => {
-                eprintln!("Error: Task '{}' failed with status: {}", task.id, status);
+            Ok(output) => {
+                eprintln!(
+                    "Error: Task '{}' failed with status: {}",
+                    task.id, output.status
+                );
+                if !output.stderr.is_empty() {
+                    eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+                }
                 Err(())
             }
             Err(CommandError::Timeout) => {

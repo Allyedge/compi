@@ -4,7 +4,7 @@ use regex::Regex;
 use serde::Deserialize;
 
 use super::{Task, dependency::validate_tasks};
-use crate::error::Result;
+use crate::error::{CompiError, Result};
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -39,18 +39,34 @@ pub fn load_tasks(config_path: &str) -> Result<TaskConfiguration> {
 
 fn load_and_parse_config(config_path: &str) -> Result<Config> {
     let contents = fs::read_to_string(config_path)?;
-    let config = toml::from_str(&contents)?;
+    let config = toml::from_str(&contents).map_err(|e| {
+        CompiError::Parse(format!(
+            "failed to parse config file '{}': {}",
+            config_path, e
+        ))
+    })?;
     Ok(config)
 }
 
 fn process_config(config: Config) -> Result<TaskConfiguration> {
     let default_task = config.config.as_ref().and_then(|c| c.default.clone());
     let cache_dir = config.config.as_ref().and_then(|c| c.cache_dir.clone());
+
     let workers = config.config.as_ref().and_then(|c| c.workers);
+    if let Some(0) = workers {
+        return Err(CompiError::Parse("workers cannot be 0".to_string()));
+    }
+
     let default_timeout = config
         .config
         .as_ref()
         .and_then(|c| c.default_timeout.clone());
+
+    if let Some(ref timeout_str) = default_timeout {
+        humantime::parse_duration(timeout_str).map_err(|e| {
+            CompiError::Parse(format!("invalid default_timeout '{}': {}", timeout_str, e))
+        })?;
+    }
 
     let mut variables = config.variables;
     add_builtin_variables(&mut variables);
