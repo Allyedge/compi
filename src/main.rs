@@ -5,6 +5,7 @@ mod cache;
 mod cli;
 mod error;
 mod execution;
+mod output;
 mod task;
 mod util;
 
@@ -12,6 +13,7 @@ use cache::{load_cache, save_cache};
 use cli::Cli;
 use error::Result;
 use execution::TaskRunner;
+use output::OutputMode;
 use task::{get_required_tasks, load_tasks, show_task_relationships, sort_topologically};
 
 #[tokio::main]
@@ -62,6 +64,11 @@ async fn run_compi(args: Cli) -> Result<()> {
 
     let workers = args.workers.or(config.workers);
     let default_timeout = args.timeout.or(config.default_timeout);
+    let output_mode = args
+        .output
+        .clone()
+        .or(config.output.clone())
+        .unwrap_or(OutputMode::Group);
 
     let mut cache = load_cache(config.cache_dir.as_deref(), &args.file);
     let mut runner = TaskRunner::new(
@@ -72,6 +79,7 @@ async fn run_compi(args: Cli) -> Result<()> {
         default_timeout,
         workers,
         args.continue_on_failure,
+        output_mode,
     );
     let cache_changed = runner.run_tasks(&task_list).await;
 

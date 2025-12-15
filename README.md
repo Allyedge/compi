@@ -100,9 +100,27 @@ compi --help
 - `--rm`: Remove outputs after successful task execution
 - `-j, --workers <N>`: Number of parallel workers (default: CPU cores)
 - `-t, --timeout <DURATION>`: Default timeout for tasks (e.g., "30s", "5m")
+- `--output <MODE>`: Output mode (`stream` or `group`, default: `group`)
 - `--dry-run`: Show what would be executed without running tasks
 - `--continue-on-failure`: Continue running independent tasks when others fail
 - `TASK`: Task to run
+
+### Output modes
+
+By default, Compi forwards task output to your terminal. The default output mode is **group**, so parallel tasks do not interleave output.
+
+- **`--output group` (default)**: Captures stdout/stderr per task and prints it as a single block after the task finishes (stdout and stderr are separated).
+- **`--output stream`**: Streams each task’s stdout/stderr live as the task runs.
+
+Examples:
+
+```bash
+# Default (grouped)
+compi --output group
+
+# Live output (may interleave when tasks run in parallel)
+compi --output stream
+```
 
 ## Configuration Format
 
@@ -116,6 +134,7 @@ default = "build"           # Default task to run
 cache_dir = "cache"         # Cache directory
 workers = 4                 # Number of parallel workers (default: CPU cores)
 default_timeout = "5m"      # Default timeout for tasks
+output = "group"            # Output mode: "stream" or "group" (default: "group")
 
 [task.task_name]
 command = "shell command"   # Command to execute

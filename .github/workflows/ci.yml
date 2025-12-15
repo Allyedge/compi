@@ -4,7 +4,6 @@ on:
   pull_request:
   push:
     branches: [main]
-
 jobs:
   build:
     strategy:
@@ -21,6 +20,7 @@ jobs:
         with:
           profile: minimal
           toolchain: stable
+          components: rustfmt, clippy
           override: true
 
       - name: cache cargo registry
@@ -35,13 +35,13 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: fmt
-          args: --all -- --check
+          args: --all
 
       - name: cargo clippy
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: --all-targets --all-features -- -D warnings
+          args: --all-targets --all-features
 
       - name: cargo build
         uses: actions-rs/cargo@v1

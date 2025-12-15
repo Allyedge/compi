@@ -5,6 +5,7 @@ use serde::Deserialize;
 
 use super::{Task, dependency::validate_tasks};
 use crate::error::{CompiError, Result};
+use crate::output::OutputMode;
 
 #[derive(Debug, Deserialize)]
 struct Config {
@@ -21,6 +22,7 @@ struct ConfigSection {
     cache_dir: Option<String>,
     workers: Option<usize>,
     default_timeout: Option<String>,
+    output: Option<OutputMode>,
 }
 
 #[derive(Debug)]
@@ -30,6 +32,7 @@ pub struct TaskConfiguration {
     pub cache_dir: Option<String>,
     pub workers: Option<usize>,
     pub default_timeout: Option<String>,
+    pub output: Option<OutputMode>,
 }
 
 pub fn load_tasks(config_path: &str) -> Result<TaskConfiguration> {
@@ -61,6 +64,7 @@ fn process_config(config: Config) -> Result<TaskConfiguration> {
         .config
         .as_ref()
         .and_then(|c| c.default_timeout.clone());
+    let output = config.config.as_ref().and_then(|c| c.output.clone());
 
     if let Some(ref timeout_str) = default_timeout {
         humantime::parse_duration(timeout_str).map_err(|e| {
@@ -91,6 +95,7 @@ fn process_config(config: Config) -> Result<TaskConfiguration> {
         cache_dir,
         workers,
         default_timeout,
+        output,
     })
 }
 

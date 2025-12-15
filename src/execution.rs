@@ -10,9 +10,10 @@ use tokio::sync::Semaphore;
 use crate::{
     cache,
     error::CompiError,
+    output::OutputMode,
     task::Task,
     util::{
-        CommandError, cleanup_outputs, expand_globs, hash_files, parse_timeout,
+        CommandError, cleanup_outputs, expand_globs, hash_files, output_print_lock, parse_timeout,
         run_command_with_timeout,
     },
 };
@@ -105,9 +106,11 @@ pub struct TaskRunner<'a> {
     default_timeout: Option<String>,
     workers: usize,
     continue_on_failure: bool,
+    output_mode: OutputMode,
 }
 
 impl<'a> TaskRunner<'a> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         tasks: &'a [Task],
         cache: &'a mut cache::Cache,
@@ -116,6 +119,7 @@ impl<'a> TaskRunner<'a> {
         default_timeout: Option<String>,
         workers: Option<usize>,
         continue_on_failure: bool,
+        output_mode: OutputMode,
     ) -> Self {
         let workers = workers.unwrap_or_else(default_workers);
         Self {
@@ -126,6 +130,7 @@ impl<'a> TaskRunner<'a> {
             default_timeout,
             workers,
             continue_on_failure,
+            output_mode,
         }
     }
 
@@ -225,6 +230,7 @@ impl<'a> TaskRunner<'a> {
             let default_timeout = self.default_timeout.clone();
             let rm = self.rm;
             let verbose = self.verbose;
+            let output_mode = self.output_mode.clone();
 
             let handle = tokio::spawn(async move {
                 let _permit = semaphore_clone.acquire().await.unwrap();
@@ -233,7 +239,8 @@ impl<'a> TaskRunner<'a> {
                     println!("Running task: {}", task_clone.id);
                 }
 
-                Self::execute_single_task(&task_clone, default_timeout, rm, verbose).await
+                Self::execute_single_task(&task_clone, default_timeout, rm, verbose, output_mode)
+                    .await
             });
 
             handles.push((task.id.clone(), handle));
@@ -276,12 +283,21 @@ impl<'a> TaskRunner<'a> {
         default_timeout: Option<String>,
         rm: bool,
         verbose: bool,
+        output_mode: OutputMode,
     ) -> Result<bool, ()> {
         let timeout = parse_timeout(task.timeout.as_deref(), default_timeout.as_deref());
+        let stream_output = matches!(output_mode, OutputMode::Stream);
 
-        match run_command_with_timeout(&task.command, timeout).await {
+        match run_command_with_timeout(&task.command, timeout, stream_output).await {
             Ok(output) if output.status.success() => {
                 let cache_updated = !task.inputs.is_empty();
+
+                if matches!(output_mode, OutputMode::Group)
+                    && (!output.stdout.is_empty() || !output.stderr.is_empty())
+                {
+                    let _guard = output_print_lock().lock().await;
+                    Self::print_group_output(&task.id, &output);
+                }
 
                 if (rm || task.auto_remove) && !task.outputs.is_empty() {
                     if let Err(e) = cleanup_outputs(&task.outputs, verbose) {
@@ -296,8 +312,11 @@ impl<'a> TaskRunner<'a> {
                     "Error: Task '{}' failed with status: {}",
                     task.id, output.status
                 );
-                if !output.stderr.is_empty() {
-                    eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+                if matches!(output_mode, OutputMode::Group)
+                    && (!output.stdout.is_empty() || !output.stderr.is_empty())
+                {
+                    let _guard = output_print_lock().lock().await;
+                    Self::print_group_output(&task.id, &output);
                 }
                 Err(())
             }
@@ -309,6 +328,30 @@ impl<'a> TaskRunner<'a> {
                 eprintln!("Error: Task '{}' failed to execute: {}", task.id, e);
                 Err(())
             }
+        }
+    }
+
+    fn print_group_output(task_id: &str, output: &std::process::Output) {
+        use std::io::Write;
+
+        if !output.stdout.is_empty() {
+            let mut out = std::io::stdout();
+            let _ = writeln!(out, "---- {} (stdout) ----", task_id);
+            let _ = out.write_all(&output.stdout);
+            if output.stdout.last() != Some(&b'\n') {
+                let _ = writeln!(out);
+            }
+            let _ = out.flush();
+        }
+
+        if !output.stderr.is_empty() {
+            let mut err = std::io::stderr();
+            let _ = writeln!(err, "---- {} (stderr) ----", task_id);
+            let _ = err.write_all(&output.stderr);
+            if output.stderr.last() != Some(&b'\n') {
+                let _ = writeln!(err);
+            }
+            let _ = err.flush();
         }
     }
 

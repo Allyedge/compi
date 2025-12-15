@@ -1,5 +1,7 @@
 use clap::Parser;
 
+use crate::output::OutputMode;
+
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
@@ -30,6 +32,10 @@ pub struct Cli {
     /// Continue executing independent tasks even if some fail
     #[arg(long = "continue-on-failure")]
     pub continue_on_failure: bool,
+
+    /// How to display task output in the terminal
+    #[arg(long = "output", value_enum)]
+    pub output: Option<OutputMode>,
 
     /// Task to run, runs default task or all tasks if not specified
     pub task: Option<String>,

@@ -6,10 +6,12 @@ use std::{
     fmt, fs,
     io::Error as IoError,
     path::{Path, PathBuf},
+    sync::OnceLock,
     time::Duration,
 };
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::process::Command as TokioCommand;
+use tokio::sync::Mutex;
 
 #[derive(Debug)]
 pub enum FileError {
@@ -188,6 +190,7 @@ pub fn hash_files(inputs: Vec<PathBuf>) -> Result<Hash, FileError> {
 pub async fn run_command_with_timeout(
     command: &str,
     timeout: Option<Duration>,
+    stream_output: bool,
 ) -> Result<std::process::Output, CommandError> {
     let mut cmd = if cfg!(target_os = "windows") {
         let mut c = TokioCommand::new("cmd");
@@ -205,40 +208,92 @@ pub async fn run_command_with_timeout(
 
     let mut child = cmd.spawn().map_err(CommandError::Io)?;
 
-    match timeout {
+    let mut stdout_pipe = child.stdout.take();
+    let mut stderr_pipe = child.stderr.take();
+
+    let stdout_handle = tokio::spawn(async move {
+        let mut collected: Vec<u8> = Vec::new();
+        if let Some(mut pipe) = stdout_pipe.take() {
+            let mut out = tokio::io::stdout();
+            let mut buf = [0u8; 8192];
+            loop {
+                let n = pipe.read(&mut buf).await.map_err(CommandError::Io)?;
+                if n == 0 {
+                    break;
+                }
+                collected.extend_from_slice(&buf[..n]);
+                if stream_output {
+                    out.write_all(&buf[..n]).await.map_err(CommandError::Io)?;
+                }
+            }
+            if stream_output {
+                out.flush().await.map_err(CommandError::Io)?;
+            }
+        }
+        Ok::<Vec<u8>, CommandError>(collected)
+    });
+
+    let stderr_handle = tokio::spawn(async move {
+        let mut collected: Vec<u8> = Vec::new();
+        if let Some(mut pipe) = stderr_pipe.take() {
+            let mut err = tokio::io::stderr();
+            let mut buf = [0u8; 8192];
+            loop {
+                let n = pipe.read(&mut buf).await.map_err(CommandError::Io)?;
+                if n == 0 {
+                    break;
+                }
+                collected.extend_from_slice(&buf[..n]);
+                if stream_output {
+                    err.write_all(&buf[..n]).await.map_err(CommandError::Io)?;
+                }
+            }
+            if stream_output {
+                err.flush().await.map_err(CommandError::Io)?;
+            }
+        }
+        Ok::<Vec<u8>, CommandError>(collected)
+    });
+
+    let status = match timeout {
         Some(duration) => {
             tokio::select! {
-                result = child.wait() => {
-                    let status = result.map_err(CommandError::Io)?;
-
-                    let mut stdout = Vec::new();
-                    let mut stderr = Vec::new();
-
-                    if let Some(mut stdout_pipe) = child.stdout.take() {
-                        stdout_pipe.read_to_end(&mut stdout).await.map_err(CommandError::Io)?;
-                    }
-
-                    if let Some(mut stderr_pipe) = child.stderr.take() {
-                        stderr_pipe.read_to_end(&mut stderr).await.map_err(CommandError::Io)?;
-                    }
-
-                    Ok(Output {
-                        status,
-                        stdout,
-                        stderr,
-                    })
-                }
+                result = child.wait() => result.map_err(CommandError::Io)?,
                 _ = tokio::time::sleep(duration) => {
                     if let Err(kill_err) = child.kill().await {
                         eprintln!("Warning: Failed to kill timed-out process: {}", kill_err);
                     }
                     let _ = child.wait().await;
-                    Err(CommandError::Timeout)
+                    return Err(CommandError::Timeout);
                 }
             }
         }
-        None => child.wait_with_output().await.map_err(CommandError::Io),
-    }
+        None => child.wait().await.map_err(CommandError::Io)?,
+    };
+
+    let stdout = match stdout_handle.await {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(e)) => return Err(e),
+        Err(e) => return Err(CommandError::Io(IoError::other(e))),
+    };
+
+    let stderr = match stderr_handle.await {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(e)) => return Err(e),
+        Err(e) => return Err(CommandError::Io(IoError::other(e))),
+    };
+
+    Ok(Output {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+static OUTPUT_PRINT_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+
+pub fn output_print_lock() -> &'static Mutex<()> {
+    OUTPUT_PRINT_LOCK.get_or_init(|| Mutex::new(()))
 }
 
 pub fn cleanup_outputs(outputs: &[PathBuf], verbose: bool) -> Result<(), FileError> {
