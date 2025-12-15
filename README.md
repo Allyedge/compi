@@ -351,9 +351,6 @@ inputs = ["app"]
 
 ### Build + Run
 
-For "run" tasks, you usually want the command to execute every time (even if nothing changed).
-Use `always_run = true` and keep a dependency on `build`:
-
 ```toml
 [task.build]
 command = "gcc *.c -o app"
@@ -403,18 +400,13 @@ command = "./app --test > test.log"
 dependencies = ["compile"]
 inputs = ["app"]
 outputs = ["test.log"]
-auto_remove = true  # Always clean up test logs
+auto_remove = true
 
 [task.package]
 command = "tar -czf app.tar.gz app"
 dependencies = ["test"]
 inputs = ["app"]
 outputs = ["app.tar.gz"]
-
-# Usage:
-# compi --rm compile  # Removes app and *.o files after compilation
-# compi test          # Automatically removes test.log (auto_remove = true)
-# compi package       # Keeps app.tar.gz (no cleanup)
 ```
 
 ## License
