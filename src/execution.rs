@@ -356,6 +356,13 @@ impl<'a> TaskRunner<'a> {
     }
 
     fn should_run_task(&self, task: &Task) -> bool {
+        if task.always_run {
+            if self.verbose {
+                println!("Task '{}': always_run=true, must run", task.id);
+            }
+            return true;
+        }
+
         if task.inputs.is_empty() {
             if self.verbose {
                 println!("Task '{}': no inputs, always run", task.id);
@@ -408,7 +415,18 @@ fn outputs_exist(task: &Task) -> bool {
         return true;
     }
 
-    task.outputs.iter().all(|output| output.exists())
+    for output_spec in &task.outputs {
+        match crate::util::expand_globs_any(std::slice::from_ref(output_spec)) {
+            Ok(expanded) => {
+                if expanded.is_empty() {
+                    return false;
+                }
+            }
+            Err(_) => return false,
+        }
+    }
+
+    true
 }
 
 fn outputs_outdated(task: &Task) -> bool {
@@ -443,7 +461,9 @@ fn newest_timestamp(paths: &[PathBuf]) -> Option<SystemTime> {
 }
 
 fn oldest_timestamp(paths: &[PathBuf]) -> Option<SystemTime> {
-    paths
+    let expanded_paths = crate::util::expand_globs_any(paths).ok()?;
+
+    expanded_paths
         .iter()
         .filter_map(|path| {
             path.metadata()

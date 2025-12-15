@@ -3,9 +3,10 @@ use glob::{GlobError, PatternError, glob};
 use std::process::{Output, Stdio};
 use std::{
     collections::HashSet,
+    ffi::OsString,
     fmt, fs,
     io::Error as IoError,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     sync::OnceLock,
     time::Duration,
 };
@@ -103,6 +104,20 @@ pub fn parse_timeout(timeout_str: Option<&str>, default_timeout: Option<&str>) -
 }
 
 pub fn expand_globs(paths: &[PathBuf]) -> Result<Vec<PathBuf>, FileError> {
+    expand_globs_impl(paths, GlobExpandMode::FilesOnly)
+}
+
+pub fn expand_globs_any(paths: &[PathBuf]) -> Result<Vec<PathBuf>, FileError> {
+    expand_globs_impl(paths, GlobExpandMode::AnyExisting)
+}
+
+#[derive(Clone, Copy)]
+enum GlobExpandMode {
+    FilesOnly,
+    AnyExisting,
+}
+
+fn expand_globs_impl(paths: &[PathBuf], mode: GlobExpandMode) -> Result<Vec<PathBuf>, FileError> {
     let mut result = Vec::new();
     let mut seen = HashSet::new();
 
@@ -112,7 +127,11 @@ pub fn expand_globs(paths: &[PathBuf]) -> Result<Vec<PathBuf>, FileError> {
         if is_glob_pattern(&path_str) {
             let expanded_paths = expand_single_glob(&path_str)?;
             for expanded_path in expanded_paths {
-                if expanded_path.is_file() && seen.insert(expanded_path.clone()) {
+                let include = match mode {
+                    GlobExpandMode::FilesOnly => expanded_path.is_file(),
+                    GlobExpandMode::AnyExisting => expanded_path.exists(),
+                };
+                if include && seen.insert(expanded_path.clone()) {
                     result.push(expanded_path);
                 }
             }
@@ -150,16 +169,21 @@ pub fn hash_files(inputs: Vec<PathBuf>) -> Result<Hash, FileError> {
         return Ok(blake3::hash(b""));
     }
 
-    let mut sorted_files = expanded_files;
-    sorted_files.sort();
+    let mut sorted_files: Vec<(String, PathBuf)> = expanded_files
+        .into_iter()
+        .map(|p| {
+            let key = normalize_path_lexical(&p).to_string_lossy().to_string();
+            (key, p)
+        })
+        .collect();
+    sorted_files.sort_by(|(ak, _), (bk, _)| ak.cmp(bk));
 
     let mut hashes = Vec::new();
 
-    for file_path in &sorted_files {
+    for (path_key, file_path) in &sorted_files {
         match fs::read(file_path) {
             Ok(contents) => {
-                let path_str = file_path.to_string_lossy();
-                let combined = format!("{}:{}", path_str.len(), path_str);
+                let combined = format!("{}:{}", path_key.len(), path_key);
                 let mut combined_bytes = combined.into_bytes();
                 combined_bytes.extend_from_slice(&contents);
 
@@ -301,7 +325,7 @@ pub fn cleanup_outputs(outputs: &[PathBuf], verbose: bool) -> Result<(), FileErr
         return Ok(());
     }
 
-    let expanded_outputs = expand_globs(outputs)?;
+    let expanded_outputs = expand_globs_any(outputs)?;
 
     for output_path in &expanded_outputs {
         if output_path.exists() {
@@ -329,4 +353,46 @@ pub fn cleanup_outputs(outputs: &[PathBuf], verbose: bool) -> Result<(), FileErr
     }
 
     Ok(())
+}
+
+fn normalize_path_lexical(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    let mut stack: Vec<OsString> = Vec::new();
+    let mut anchored = false;
+
+    for comp in path.components() {
+        match comp {
+            Component::Prefix(p) => {
+                out.push(p.as_os_str());
+                anchored = true;
+            }
+            Component::RootDir => {
+                out.push(comp.as_os_str());
+                anchored = true;
+            }
+            Component::CurDir => {}
+            Component::Normal(s) => stack.push(s.to_os_string()),
+            Component::ParentDir => {
+                if let Some(last) = stack.last() {
+                    if last != ".." {
+                        stack.pop();
+                    } else if !anchored {
+                        stack.push(OsString::from(".."));
+                    }
+                } else if !anchored {
+                    stack.push(OsString::from(".."));
+                }
+            }
+        }
+    }
+
+    for part in stack {
+        out.push(part);
+    }
+
+    if out.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        out
+    }
 }

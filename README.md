@@ -142,6 +142,7 @@ dependencies = ["dep1"]     # Tasks that must run before this one
 inputs = ["src/*.rs"]       # Input files
 outputs = ["target/app"]    # Output files
 auto_remove = false         # Automatically remove outputs after successful execution
+always_run = false          # Always run this task
 timeout = "10m"             # Task-specific timeout (overrides default)
 ```
 
@@ -242,6 +243,7 @@ command = "scp app ${ENV_USER}@server:/home/${ENV_USER}/bin/"
 - `inputs`: Array of input files/patterns (supports globs)
 - `outputs`: Array of output files this task produces
 - `auto_remove`: Automatically remove outputs after successful execution (default: `false`)
+- `always_run`: Always run this task (default: `false`).
 - `timeout`: Task timeout duration (e.g., "30s", "5m", "1h") - overrides default
 
 ## Build Logic
@@ -252,6 +254,11 @@ Compi uses a 4-tier system to determine if a task should run:
 2. **Missing outputs**: Must run if any output file doesn't exist
 3. **Outdated outputs**: Run if any input is newer than any output
 4. **Content changed**: Run if file content hash changed since last run
+
+Notes:
+
+- Tasks with **inputs** may be **skipped** on subsequent runs if inputs haven't changed. For "run-only" tasks, prefer `always_run = true` (or omit `inputs`).
+- Output globs like `*.o` are treated as required outputs: if the pattern matches nothing, the task is considered out-of-date and will run.
 
 ## Glob Patterns
 
@@ -340,6 +347,23 @@ inputs = ["app"]
 command = "scp app server:/"
 dependencies = ["test"]
 inputs = ["app"]
+```
+
+### Build + Run
+
+For "run" tasks, you usually want the command to execute every time (even if nothing changed).
+Use `always_run = true` and keep a dependency on `build`:
+
+```toml
+[task.build]
+command = "gcc *.c -o app"
+inputs = ["*.c", "*.h"]
+outputs = ["app", "*.o"]
+
+[task.run]
+command = "./app"
+dependencies = ["build"]
+always_run = true
 ```
 
 ### Multi-Language Project

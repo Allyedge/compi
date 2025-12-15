@@ -23,5 +23,7 @@ pub struct Task {
     #[serde(default)]
     pub auto_remove: bool,
     #[serde(default)]
+    pub always_run: bool,
+    #[serde(default)]
     pub timeout: Option<String>,
 }
