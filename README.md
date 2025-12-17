@@ -1,17 +1,16 @@
 # Compi
 
 ![GitHub License](https://img.shields.io/github/license/allyedge/compi)
-
 ![Crates.io Total Downloads](https://img.shields.io/crates/d/compi)
 
 A build system written in Rust.
 
 ## Features
 
-- **Clean TOML structure**: Compi uses a clean TOML structure to define tasks.
-- **Safety**: Compi uses dependencies, inputs and outputs defined for the tasks to warn you of potential issues.
-- **Dependencies**: By using dependencies, Compi allows for a clean representation of very complex command chains.
-- **Parallel execution**: Compi runs independent tasks concurrently for faster execution.
+- **Clean TOML structure**: Simple and declarative task definitions.
+- **Incremental Builds**: Tracks file hashes and modification times to skip unnecessary work.
+- **Dependencies**: Automatic DAG resolution for complex build chains.
+- **Parallel Execution**: Concurrent execution of independent tasks.
 
 ## Installation
 
@@ -61,353 +60,99 @@ Download the executable from the releases page and add it to your PATH.
 
 ## CLI Usage
 
+| Flag | Description |
+|------|-------------|
+| `-f, --file <FILE>` | Configuration file (default: `compi.toml`) |
+| `-j, --workers <N>` | Number of parallel workers (default: CPU cores) |
+| `-t, --timeout <DURATION>` | Default timeout (e.g., "30s", "5m") |
+| `--output <MODE>` | Output mode: `group` (default) or `stream` |
+| `--dry-run` | Preview execution order without running tasks |
+| `--rm` | Remove output files after successful execution |
+| `-v, --verbose` | Enable verbose logging |
+
 ```bash
-# Run default task
 compi
-
-# Run specific task
 compi build
-
-# Use a different config file
-compi -f my-config.toml
-
-# Verbose output
-compi -v build
-
-# Remove outputs after successful execution
-compi --rm build
-
-# Run with specific number of workers
 compi -j 8 build
-
-# Set task timeout and dry run
-compi -t 30s --dry-run test
-
-# Continue on failure with verbose output
-compi --continue-on-failure -v all
-
-# Combine flags
-compi --rm -v -j 2 test
-
-# Show help
-compi --help
+compi -t 5m test
+compi --rm build
 ```
 
-### Command Options
+## Configuration Reference
 
-- `-f, --file <FILE>`: Configuration file (default: `compi.toml`)
-- `-v, --verbose`: Enable verbose output
-- `--rm`: Remove outputs after successful task execution
-- `-j, --workers <N>`: Number of parallel workers (default: CPU cores)
-- `-t, --timeout <DURATION>`: Default timeout for tasks (e.g., "30s", "5m")
-- `--output <MODE>`: Output mode (`stream` or `group`, default: `group`)
-- `--dry-run`: Show what would be executed without running tasks
-- `--continue-on-failure`: Continue running independent tasks when others fail
-- `TASK`: Task to run
-
-### Output modes
-
-By default, Compi forwards task output to your terminal. The default output mode is **group**, so parallel tasks do not interleave output.
-
-- **`--output group` (default)**: Captures stdout/stderr per task and prints it as a single block after the task finishes (stdout and stderr are separated).
-- **`--output stream`**: Streams each task’s stdout/stderr live as the task runs.
-
-Examples:
-
-```bash
-# Default (grouped)
-compi --output group
-
-# Live output (may interleave when tasks run in parallel)
-compi --output stream
-```
-
-## Configuration Format
-
-Create a `compi.toml` file in your project root:
-
-### Basic Structure
-
-```toml
-[config]
-default = "build"           # Default task to run
-cache_dir = "cache"         # Cache directory
-workers = 4                 # Number of parallel workers (default: CPU cores)
-default_timeout = "5m"      # Default timeout for tasks
-output = "group"            # Output mode: "stream" or "group" (default: "group")
-
-[task.task_name]
-command = "shell command"   # Command to execute
-dependencies = ["dep1"]     # Tasks that must run before this one
-inputs = ["src/*.rs"]       # Input files
-outputs = ["target/app"]    # Output files
-auto_remove = false         # Automatically remove outputs after successful execution
-always_run = false          # Always run this task
-timeout = "10m"             # Task-specific timeout (overrides default)
-```
-
-### Example Configuration
+Create a `compi.toml` in your project root.
 
 ```toml
 [config]
 default = "build"
-cache_dir = ".build-cache"
+cache_dir = ".compi_cache"
+workers = 4
+default_timeout = "10m"
+output = "group"
 
 [variables]
-TARGET_DIR = "target"
-APP_NAME = "myapp"
-SOURCE_PATTERN = "src/**/*.rs"
-TEST_PATTERN = "tests/**/*.rs"
+TARGET = "target"
+SRC = "src/**/*.rs"
+FLAGS = "--release"
 
 [task.prepare]
-id = "prep"
-command = "mkdir -p ${TARGET_DIR}"
-outputs = ["${TARGET_DIR}/"]
+command = "mkdir -p ${TARGET}"
+outputs = ["${TARGET}/"]
+aliases = ["p"]
 
 [task.build]
-command = "cargo build"
-dependencies = ["prep"]
-inputs = [
-    "${SOURCE_PATTERN}",
-    "Cargo.toml"
-]
-outputs = ["${TARGET_DIR}/debug/${APP_NAME}"]
+dependencies = ["prepare"]
+command = "cargo build ${FLAGS}"
+inputs = ["${SRC}", "Cargo.toml"]
+outputs = ["${TARGET}/app"]
+aliases = ["b"]
 
 [task.test]
-command = "cargo test"
 dependencies = ["build"]
-inputs = ["${SOURCE_PATTERN}", "${TEST_PATTERN}"]
+command = "cargo test"
+inputs = ["tests/**/*.rs"]
+always_run = true
+aliases = ["t"]
 
 [task.clean]
-command = "rm -rf ${TARGET_DIR}/"
+command = "rm -rf ${TARGET}"
 ```
 
-## Variables
-
-Compi supports variables for reducing duplication and making configurations more maintainable.
-
-### Variable Definition
-
-Define variables in the `[variables]` section:
-
-```toml
-[variables]
-TARGET_DIR = "target"
-BUILD_TYPE = "debug"
-BINARY_NAME = "myapp"
-SOURCE_PATTERN = "src/**/*.rs"
-COMPILE_FLAGS = "--release --target x86_64-unknown-linux-gnu"
-```
-
-### Variable Usage
-
-Use variables anywhere in your configuration with `${VAR_NAME}` or `$VAR_NAME` syntax:
-
-```toml
-[task.build]
-command = "cargo build ${COMPILE_FLAGS}"
-inputs = ["${SOURCE_PATTERN}", "Cargo.toml"]
-outputs = ["${TARGET_DIR}/${BUILD_TYPE}/${BINARY_NAME}"]
-```
-
-### Built-in Variables
-
-Compi provides several built-in variables:
-
-- `$PWD`: Current working directory
-- `$ENV_*`: All environment variables prefixed with `ENV_` (e.g., `$ENV_HOME`, `$ENV_USER`)
-
-### Environment Variables
-
-Access environment variables using the `ENV_` prefix:
-
-```toml
-[variables]
-HOME_DIR = "${ENV_HOME}"
-USER_NAME = "${ENV_USER}"
-
-[task.deploy]
-command = "scp app ${ENV_USER}@server:/home/${ENV_USER}/bin/"
-```
-
-## Task Fields
-
-### Required Fields
-
-- `command`: Shell command to execute
-
-### Optional Fields
-
-- `id`: Override the task name (defaults to `[task.name]`)
-- `dependencies`: Array of task names that must run first
-- `inputs`: Array of input files/patterns (supports globs)
-- `outputs`: Array of output files this task produces
-- `auto_remove`: Automatically remove outputs after successful execution (default: `false`)
-- `always_run`: Always run this task (default: `false`).
-- `timeout`: Task timeout duration (e.g., "30s", "5m", "1h") - overrides default
-
-## Build Logic
-
-Compi uses a 4-tier system to determine if a task should run:
-
-1. **No inputs**: Always run (e.g., cleanup tasks)
-2. **Missing outputs**: Must run if any output file doesn't exist
-3. **Outdated outputs**: Run if any input is newer than any output
-4. **Content changed**: Run if file content hash changed since last run
-
-Notes:
-
-- Tasks with **inputs** may be **skipped** on subsequent runs if inputs haven't changed. For "run-only" tasks, prefer `always_run = true` (or omit `inputs`).
-- Output globs like `*.o` are treated as required outputs: if the pattern matches nothing, the task is considered out-of-date and will run.
-
-## Glob Patterns
-
-Input files support standard glob patterns:
-
-- `*.rs`: All Rust files in current directory
-- `src/**/*.rs`: All Rust files in src and subdirectories
-- `test/*.{rs,toml}`: Rust and TOML files in test directory
-
-## Dependency Management
-
-- Tasks run in topological order based on dependencies
-- Independent tasks can execute in parallel using configurable worker pools
-- Circular dependencies are detected and reported as errors
-- Missing dependencies cause build failure
-
-## Output Cleanup
-
-Compi provides two ways to automatically clean up outputs after successful task execution:
-
-### CLI Flag
-
-Use the `--rm` flag to remove outputs after running a task:
-
-```bash
-# Remove outputs after building
-compi --rm build
-
-# Remove outputs with verbose logging
-compi --rm -v test
-```
-
-### Auto-Remove Field
-
-Set `auto_remove = true` in task configuration for automatic cleanup:
-
-```toml
-[task.temp_build]
-command = "gcc -o temp_app *.c"
-outputs = ["temp_app", "*.o"]
-auto_remove = true  # Always clean up after successful execution
-
-[task.generate_docs]
-command = "doxygen"
-outputs = ["docs/"]
-# Only removed if --rm flag is used
-```
-
-### Behavior
-
-- **Only on success**: Outputs are only removed if the task exits with code 0
-- **Glob expansion**: Patterns like `*.o` are expanded to actual files before removal
-- **Safe deletion**: Only the files/directories explicitly listed in outputs are deleted
-
-## Cache System
-
-- Stores file content hashes to detect changes
-- Configurable location via `cache_dir` in config
-- Cache location is relative to the config file
-
-## Error Handling
-
-- **Errors**: Stop execution (missing tasks, circular deps, command failures)
-- **Warnings**: Continue execution (missing files, glob errors)
-- **Info**: Verbose mode only (dependency relationships)
-
-## Examples
-
-### Simple Build Pipeline
-
-```toml
-[config]
-default = "deploy"
-
-[task.compile]
-command = "gcc *.c -o app"
-inputs = ["*.c", "*.h"]
-outputs = ["app"]
-
-[task.test]
-command = "./app --test"
-dependencies = ["compile"]
-inputs = ["app"]
-
-[task.deploy]
-command = "scp app server:/"
-dependencies = ["test"]
-inputs = ["app"]
-```
-
-### Build + Run
-
-```toml
-[task.build]
-command = "gcc *.c -o app"
-inputs = ["*.c", "*.h"]
-outputs = ["app", "*.o"]
-
-[task.run]
-command = "./app"
-dependencies = ["build"]
-always_run = true
-```
-
-### Multi-Language Project
-
-```toml
-[config]
-default = "all"
-
-[task.js]
-command = "npm run build"
-inputs = ["src/**/*.js", "package.json"]
-outputs = ["dist/app.js"]
-
-[task.css]
-command = "sass src/style.scss dist/style.css"
-inputs = ["src/**/*.scss"]
-outputs = ["dist/style.css"]
-
-[task.all]
-dependencies = ["js", "css"]
-command = "echo 'Build complete'"
-```
-
-### Build with Cleanup
-
-```toml
-[config]
-default = "package"
-
-[task.compile]
-command = "gcc *.c -o app"
-inputs = ["*.c", "*.h"]
-outputs = ["app", "*.o"]
-
-[task.test]
-command = "./app --test > test.log"
-dependencies = ["compile"]
-inputs = ["app"]
-outputs = ["test.log"]
-auto_remove = true
-
-[task.package]
-command = "tar -czf app.tar.gz app"
-dependencies = ["test"]
-inputs = ["app"]
-outputs = ["app.tar.gz"]
-```
+## Reference
+
+### Task Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `command` | String | **Required.** Shell command to execute. |
+| `dependencies` | [String] | List of task IDs that must complete first. |
+| `inputs` | [String] | List of files/globs to track for changes. |
+| `outputs` | [String] | List of files/globs this task produces. |
+| `aliases` | [String] | Short names for CLI invocation (e.g. `["b"]`). |
+| `always_run` | Boolean | If true, ignore cache and always execute. |
+| `auto_remove` | Boolean | If true, delete outputs after success (temp files). |
+| `timeout` | String | Duration string (e.g. "30s") for this specific task. |
+
+### Caching & Execution Logic
+
+Compi uses a local cache (`compi_cache.json`) to skip tasks that are up-to-date.
+
+A task is **SKIPPED** if:
+1. All `outputs` exist.
+2. The `inputs` content hash matches the previous run.
+3. The `inputs` modification times are older than the `outputs`.
+
+A task **RUNS** if:
+1. It has no `inputs` defined.
+2. `always_run` is set to `true`.
+3. Any output file is missing.
+4. Input files have changed (content hash mismatch).
+5. Input files are newer than output files.
+
+### Output Cleanup
+
+- **`--rm` flag**: Deletes files listed in `outputs` after the task succeeds.
+- **`auto_remove = true`**: Acts like `--rm` is always passed for that specific task.
 
 ## License
 

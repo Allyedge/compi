@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque, hash_map::Entry::Occupied};
+use std::collections::{hash_map::Entry::Occupied, HashMap, HashSet, VecDeque};
 
 use super::Task;
 use crate::error::{CompiError, Result};
@@ -42,6 +42,7 @@ pub fn sort_topologically(tasks: &[Task]) -> Vec<String> {
 
 pub fn validate_tasks(tasks: &[Task]) -> Result<()> {
     let task_ids: HashSet<&str> = tasks.iter().map(|t| t.id.as_str()).collect();
+    let mut aliases: HashMap<&str, &str> = HashMap::new();
 
     for task in tasks {
         for dep_id in &task.dependencies {
@@ -58,6 +59,24 @@ pub fn validate_tasks(tasks: &[Task]) -> Result<()> {
                 )));
             }
         }
+
+        for alias in &task.aliases {
+            if task_ids.contains(alias.as_str()) {
+                return Err(CompiError::Dependency(format!(
+                    "Task '{}' defines alias '{}' which conflicts with task ID '{}'",
+                    task.id, alias, alias
+                )));
+            }
+
+            if let Some(existing_task) = aliases.get(alias.as_str()) {
+                return Err(CompiError::Dependency(format!(
+                    "Task '{}' defines alias '{}' which is already used by task '{}'",
+                    task.id, alias, existing_task
+                )));
+            }
+
+            aliases.insert(alias.as_str(), &task.id);
+        }
     }
 
     detect_cycles(tasks)?;
@@ -67,17 +86,30 @@ pub fn validate_tasks(tasks: &[Task]) -> Result<()> {
 pub fn get_required_tasks(tasks: &[Task], target_task_id: &str) -> Result<Vec<String>> {
     let task_map: HashMap<&str, &Task> = tasks.iter().map(|t| (t.id.as_str(), t)).collect();
 
-    if !task_map.contains_key(target_task_id) {
-        return Err(CompiError::Task(format!(
-            "Task '{}' not found",
-            target_task_id
-        )));
+    let mut resolved_id = target_task_id;
+
+    if !task_map.contains_key(resolved_id) {
+        let alias_match = tasks
+            .iter()
+            .find(|t| t.aliases.iter().any(|a| a == target_task_id));
+
+        match alias_match {
+            Some(task) => {
+                resolved_id = &task.id;
+            }
+            None => {
+                return Err(CompiError::Task(format!(
+                    "Task '{}' not found",
+                    target_task_id
+                )));
+            }
+        }
     }
 
     let mut needed_tasks = HashSet::new();
     let mut queue = VecDeque::new();
 
-    queue.push_back(target_task_id);
+    queue.push_back(resolved_id);
 
     while let Some(current_task_id) = queue.pop_front() {
         if needed_tasks.contains(current_task_id) {

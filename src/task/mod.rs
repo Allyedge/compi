@@ -15,6 +15,8 @@ pub struct Task {
     pub id: String,
     pub command: String,
     #[serde(default)]
+    pub aliases: Vec<String>,
+    #[serde(default)]
     pub dependencies: Vec<String>,
     #[serde(default)]
     pub inputs: Vec<PathBuf>,
