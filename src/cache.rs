@@ -1,14 +1,14 @@
 use std::{
-    collections::HashSet,
+    collections::HashMap,
     fs::{self, File},
     io::{BufReader, BufWriter},
     path::{Path, PathBuf},
 };
 
-const DEFAULT_CACHE_DIR: &str = ".";
-const CACHE_FILENAME: &str = "compi_cache.json";
+const DEFAULT_CACHE_DIR: &str = ".compi";
+const CACHE_FILENAME: &str = "cache.json";
 
-pub type Cache = HashSet<String>;
+pub type Cache = HashMap<String, String>;
 
 pub fn load_cache(cache_dir: Option<&str>, config_path: &str) -> Cache {
     let cache_path = get_cache_path(cache_dir, config_path);

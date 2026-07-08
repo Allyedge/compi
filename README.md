@@ -60,15 +60,15 @@ Download the executable from the releases page and add it to your PATH.
 
 ## CLI Usage
 
-| Flag | Description |
-|------|-------------|
-| `-f, --file <FILE>` | Configuration file (default: `compi.toml`) |
-| `-j, --workers <N>` | Number of parallel workers (default: CPU cores) |
-| `-t, --timeout <DURATION>` | Default timeout (e.g., "30s", "5m") |
-| `--output <MODE>` | Output mode: `group` (default) or `stream` |
-| `--dry-run` | Preview execution order without running tasks |
-| `--rm` | Remove output files after successful execution |
-| `-v, --verbose` | Enable verbose logging |
+| Flag                       | Description                                     |
+| -------------------------- | ----------------------------------------------- |
+| `-f, --file <FILE>`        | Configuration file (default: `compi.toml`)      |
+| `-j, --workers <N>`        | Number of parallel workers (default: CPU cores) |
+| `-t, --timeout <DURATION>` | Default timeout (e.g., "30s", "5m")             |
+| `--output <MODE>`          | Output mode: `group` (default) or `stream`      |
+| `--dry-run`                | Preview execution order without running tasks   |
+| `--rm`                     | Remove output files after successful execution  |
+| `-v, --verbose`            | Enable verbose logging                          |
 
 ```bash
 compi
@@ -122,37 +122,40 @@ command = "rm -rf ${TARGET}"
 
 ### Task Fields
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `command` | String | **Required.** Shell command to execute. |
-| `dependencies` | [String] | List of task IDs that must complete first. |
-| `inputs` | [String] | List of files/globs to track for changes. |
-| `outputs` | [String] | List of files/globs this task produces. |
-| `aliases` | [String] | Short names for CLI invocation (e.g. `["b"]`). |
-| `always_run` | Boolean | If true, ignore cache and always execute. |
-| `auto_remove` | Boolean | If true, delete outputs after success (temp files). |
-| `timeout` | String | Duration string (e.g. "30s") for this specific task. |
+| Field          | Type     | Description                                          |
+| -------------- | -------- | ---------------------------------------------------- |
+| `command`      | String   | **Required.** Shell command to execute.              |
+| `dependencies` | [String] | List of task IDs that must complete first.           |
+| `inputs`       | [String] | List of files/globs to track for changes.            |
+| `outputs`      | [String] | List of files/globs this task produces.              |
+| `aliases`      | [String] | Short names for CLI invocation (e.g. `["b"]`).       |
+| `always_run`   | Boolean  | If true, ignore cache and always execute.            |
+| `auto_remove`  | Boolean  | If true, delete outputs after success (temp files).  |
+| `timeout`      | String   | Duration string (e.g. "30s") for this specific task. |
 
 ### Caching & Execution Logic
 
-Compi uses a local cache (`compi_cache.json`) to skip tasks that are up-to-date.
+Compi uses a local cache (`.compi/cache.json`) to skip tasks that are up-to-date. Cache entries are keyed per task and include the task's input content, command, and declared outputs.
 
 A task is **SKIPPED** if:
+
 1. All `outputs` exist.
-2. The `inputs` content hash matches the previous run.
+2. The task cache entry matches the previous run.
 3. The `inputs` modification times are older than the `outputs`.
 
 A task **RUNS** if:
+
 1. It has no `inputs` defined.
 2. `always_run` is set to `true`.
 3. Any output file is missing.
-4. Input files have changed (content hash mismatch).
+4. Inputs, command, or declared outputs have changed.
 5. Input files are newer than output files.
 
 ### Output Cleanup
 
 - **`--rm` flag**: Deletes files listed in `outputs` after the task succeeds.
 - **`auto_remove = true`**: Acts like `--rm` is always passed for that specific task.
+- Failed tasks delete declared outputs to avoid reusing partial files on the next run.
 
 ## License
 

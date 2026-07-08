@@ -135,6 +135,7 @@ impl<'a> TaskRunner<'a> {
     }
 
     pub async fn run_tasks(&mut self, task_ids: &[String]) -> bool {
+        let cache_pruned = self.prune_cache_to_configured_tasks();
         let tasks_to_run: Vec<Task> = task_ids
             .iter()
             .filter_map(|task_id| self.tasks.iter().find(|t| &t.id == task_id))
@@ -142,7 +143,7 @@ impl<'a> TaskRunner<'a> {
             .collect();
 
         if tasks_to_run.is_empty() {
-            return false;
+            return cache_pruned;
         }
 
         let execution_levels = match calculate_dependency_levels(&tasks_to_run) {
@@ -164,7 +165,7 @@ impl<'a> TaskRunner<'a> {
             }
         }
 
-        let mut any_cache_updated = false;
+        let mut any_cache_updated = cache_pruned;
 
         for level in execution_levels {
             if self.verbose {
@@ -198,6 +199,16 @@ impl<'a> TaskRunner<'a> {
         }
 
         any_cache_updated
+    }
+
+    fn prune_cache_to_configured_tasks(&mut self) -> bool {
+        let task_ids: HashSet<&str> = self.tasks.iter().map(|task| task.id.as_str()).collect();
+        let previous_len = self.cache.len();
+
+        self.cache
+            .retain(|task_id, _| task_ids.contains(task_id.as_str()));
+
+        self.cache.len() != previous_len
     }
 
     async fn execute_level_parallel(&mut self, task_ids: &[String]) -> Result<bool, ()> {
@@ -253,8 +264,8 @@ impl<'a> TaskRunner<'a> {
                         any_cache_updated = true;
                         if let Some(task) = self.tasks.iter().find(|t| t.id == task_id) {
                             if !task.inputs.is_empty() {
-                                if let Ok(hash) = hash_files(task.inputs.clone()) {
-                                    self.cache.insert(hash.to_hex().to_string());
+                                if let Ok(hash_key) = task_cache_key(task) {
+                                    self.cache.insert(task.id.clone(), hash_key);
                                 }
                             }
                         }
@@ -318,14 +329,17 @@ impl<'a> TaskRunner<'a> {
                     let _guard = output_print_lock().lock().await;
                     Self::print_group_output(&task.id, &output);
                 }
+                cleanup_failed_outputs(task, verbose);
                 Err(())
             }
             Err(CommandError::Timeout) => {
                 eprintln!("Error: Task '{}' timed out", task.id);
+                cleanup_failed_outputs(task, verbose);
                 Err(())
             }
             Err(CommandError::Io(e)) => {
                 eprintln!("Error: Task '{}' failed to execute: {}", task.id, e);
+                cleanup_failed_outputs(task, verbose);
                 Err(())
             }
         }
@@ -384,10 +398,9 @@ impl<'a> TaskRunner<'a> {
             return true;
         }
 
-        match hash_files(task.inputs.clone()) {
-            Ok(hash) => {
-                let hash_key = hash.to_hex().to_string();
-                if !self.cache.contains(&hash_key) {
+        match task_cache_key(task) {
+            Ok(hash_key) => {
+                if self.cache.get(&task.id) != Some(&hash_key) {
                     if self.verbose {
                         println!("Task '{}': input content changed, must run", task.id);
                     }
@@ -407,6 +420,45 @@ impl<'a> TaskRunner<'a> {
             println!("Task '{}': outputs up-to-date, skipping", task.id);
         }
         false
+    }
+}
+
+fn task_cache_key(task: &Task) -> Result<String, crate::util::FileError> {
+    let input_hash = hash_files(task.inputs.clone())?;
+    let mut hasher = blake3::Hasher::new();
+
+    hasher.update(b"inputs");
+    hasher.update(input_hash.as_bytes());
+    hasher.update(b"command");
+    hasher.update(task.command.as_bytes());
+    hasher.update(b"outputs");
+
+    let mut outputs: Vec<String> = task
+        .outputs
+        .iter()
+        .map(|path| path.to_string_lossy().to_string())
+        .collect();
+    outputs.sort();
+
+    for output in outputs {
+        hasher.update(output.len().to_string().as_bytes());
+        hasher.update(b":");
+        hasher.update(output.as_bytes());
+    }
+
+    Ok(hasher.finalize().to_hex().to_string())
+}
+
+fn cleanup_failed_outputs(task: &Task, verbose: bool) {
+    if task.outputs.is_empty() {
+        return;
+    }
+
+    if let Err(e) = cleanup_outputs(&task.outputs, verbose) {
+        eprintln!(
+            "Warning: Failed to delete outputs after task '{}' failed: {}",
+            task.id, e
+        );
     }
 }
 
