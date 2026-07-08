@@ -33,6 +33,10 @@ pub struct Cli {
     #[arg(long = "continue-on-failure")]
     pub continue_on_failure: bool,
 
+    /// Delete concrete declared outputs when a task fails
+    #[arg(long = "delete-on-error")]
+    pub delete_on_error: bool,
+
     /// How to display task output in the terminal
     #[arg(long = "output", value_enum)]
     pub output: Option<OutputMode>,

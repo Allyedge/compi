@@ -143,7 +143,7 @@ fn expand_globs_impl(paths: &[PathBuf], mode: GlobExpandMode) -> Result<Vec<Path
     Ok(result)
 }
 
-fn is_glob_pattern(path: &str) -> bool {
+pub fn is_glob_pattern(path: &str) -> bool {
     path.contains('*') || path.contains('?') || path.contains('[')
 }
 

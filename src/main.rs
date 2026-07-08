@@ -69,6 +69,7 @@ async fn run_compi(args: Cli) -> Result<()> {
         .clone()
         .or(config.output.clone())
         .unwrap_or(OutputMode::Group);
+    let delete_on_error = args.delete_on_error || config.delete_on_error.unwrap_or(false);
 
     let mut cache = load_cache(config.cache_dir.as_deref(), &args.file);
     let mut runner = TaskRunner::new(
@@ -80,6 +81,7 @@ async fn run_compi(args: Cli) -> Result<()> {
         workers,
         args.continue_on_failure,
         output_mode,
+        delete_on_error,
     );
     let cache_changed = runner.run_tasks(&task_list).await;
 

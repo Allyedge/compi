@@ -23,6 +23,7 @@ struct ConfigSection {
     workers: Option<usize>,
     default_timeout: Option<String>,
     output: Option<OutputMode>,
+    delete_on_error: Option<bool>,
 }
 
 #[derive(Debug)]
@@ -33,6 +34,7 @@ pub struct TaskConfiguration {
     pub workers: Option<usize>,
     pub default_timeout: Option<String>,
     pub output: Option<OutputMode>,
+    pub delete_on_error: Option<bool>,
 }
 
 pub fn load_tasks(config_path: &str) -> Result<TaskConfiguration> {
@@ -65,6 +67,7 @@ fn process_config(config: Config) -> Result<TaskConfiguration> {
         .as_ref()
         .and_then(|c| c.default_timeout.clone());
     let output = config.config.as_ref().and_then(|c| c.output.clone());
+    let delete_on_error = config.config.as_ref().and_then(|c| c.delete_on_error);
 
     if let Some(ref timeout_str) = default_timeout {
         humantime::parse_duration(timeout_str).map_err(|e| {
@@ -96,6 +99,7 @@ fn process_config(config: Config) -> Result<TaskConfiguration> {
         workers,
         default_timeout,
         output,
+        delete_on_error,
     })
 }
 

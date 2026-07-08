@@ -11,13 +11,13 @@ pub fn show_task_relationships(tasks: &[Task], verbose: bool) {
 
     for task in tasks {
         for dep_id in &task.dependencies {
-            if let Some(dep_task) = task_map.get(dep_id.as_str()) {
-                if !has_file_relationship(task, dep_task) {
-                    println!(
-                        "Info: Task '{}' depends on '{}' for ordering only",
-                        task.id, dep_id
-                    );
-                }
+            if let Some(dep_task) = task_map.get(dep_id.as_str())
+                && !has_file_relationship(task, dep_task)
+            {
+                println!(
+                    "Info: Task '{}' depends on '{}' for ordering only",
+                    task.id, dep_id
+                );
             }
         }
     }
@@ -47,22 +47,22 @@ fn paths_match(output: &Path, input: &Path) -> bool {
         return true;
     }
 
-    if is_glob_pattern(&input_str) {
-        if let Ok(glob_paths) = glob::glob(&input_str) {
-            for entry in glob_paths.flatten() {
-                if entry == *output {
-                    return true;
-                }
+    if is_glob_pattern(&input_str)
+        && let Ok(glob_paths) = glob::glob(&input_str)
+    {
+        for entry in glob_paths.flatten() {
+            if entry == *output {
+                return true;
             }
         }
     }
 
-    if input_str.contains("**") {
-        if let Some(prefix) = input_str.split("**").next() {
-            if !prefix.is_empty() && output_str.starts_with(prefix) {
-                return true;
-            }
-        }
+    if input_str.contains("**")
+        && let Some(prefix) = input_str.split("**").next()
+        && !prefix.is_empty()
+        && output_str.starts_with(prefix)
+    {
+        return true;
     }
 
     false

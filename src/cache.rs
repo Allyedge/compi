@@ -25,11 +25,11 @@ pub fn load_cache(cache_dir: Option<&str>, config_path: &str) -> Cache {
 pub fn save_cache(cache: &Cache, cache_dir: Option<&str>, config_path: &str) {
     let cache_path = get_cache_path(cache_dir, config_path);
 
-    if let Some(parent) = cache_path.parent() {
-        if let Err(e) = fs::create_dir_all(parent) {
-            eprintln!("Warning: Failed to create cache directory: {}", e);
-            return;
-        }
+    if let Some(parent) = cache_path.parent()
+        && let Err(e) = fs::create_dir_all(parent)
+    {
+        eprintln!("Warning: Failed to create cache directory: {}", e);
+        return;
     }
 
     match File::create(&cache_path) {

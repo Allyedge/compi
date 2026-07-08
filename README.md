@@ -68,6 +68,7 @@ Download the executable from the releases page and add it to your PATH.
 | `--output <MODE>`          | Output mode: `group` (default) or `stream`      |
 | `--dry-run`                | Preview execution order without running tasks   |
 | `--rm`                     | Remove output files after successful execution  |
+| `--delete-on-error`        | Remove concrete output files after task failure |
 | `-v, --verbose`            | Enable verbose logging                          |
 
 ```bash
@@ -122,16 +123,17 @@ command = "rm -rf ${TARGET}"
 
 ### Task Fields
 
-| Field          | Type     | Description                                          |
-| -------------- | -------- | ---------------------------------------------------- |
-| `command`      | String   | **Required.** Shell command to execute.              |
-| `dependencies` | [String] | List of task IDs that must complete first.           |
-| `inputs`       | [String] | List of files/globs to track for changes.            |
-| `outputs`      | [String] | List of files/globs this task produces.              |
-| `aliases`      | [String] | Short names for CLI invocation (e.g. `["b"]`).       |
-| `always_run`   | Boolean  | If true, ignore cache and always execute.            |
-| `auto_remove`  | Boolean  | If true, delete outputs after success (temp files).  |
-| `timeout`      | String   | Duration string (e.g. "30s") for this specific task. |
+| Field             | Type     | Description                                          |
+| ----------------- | -------- | ---------------------------------------------------- |
+| `command`         | String   | **Required.** Shell command to execute.              |
+| `dependencies`    | [String] | List of task IDs that must complete first.           |
+| `inputs`          | [String] | List of files/globs to track for changes.            |
+| `outputs`         | [String] | List of files/globs this task produces.              |
+| `aliases`         | [String] | Short names for CLI invocation (e.g. `["b"]`).       |
+| `always_run`      | Boolean  | If true, ignore cache and always execute.            |
+| `auto_remove`     | Boolean  | If true, delete outputs after success (temp files).  |
+| `delete_on_error` | Boolean  | If true, delete concrete outputs after failure.      |
+| `timeout`         | String   | Duration string (e.g. "30s") for this specific task. |
 
 ### Caching & Execution Logic
 
@@ -155,7 +157,9 @@ A task **RUNS** if:
 
 - **`--rm` flag**: Deletes files listed in `outputs` after the task succeeds.
 - **`auto_remove = true`**: Acts like `--rm` is always passed for that specific task.
-- Failed tasks delete declared outputs to avoid reusing partial files on the next run.
+- **`--delete-on-error` flag**: Deletes concrete files/directories listed in `outputs` after a task fails.
+- **`delete_on_error = true`**: Enables failed-output cleanup globally under `[config]` or for a specific task.
+- Failed-output cleanup does not delete glob outputs or files that are also inputs.
 
 ## License
 

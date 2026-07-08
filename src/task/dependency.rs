@@ -29,10 +29,10 @@ pub fn sort_topologically(tasks: &[Task]) -> Vec<String> {
 
             let entry = in_degrees.entry(&dependent.id).and_modify(|c| *c -= 1);
 
-            if let Occupied(entry) = entry {
-                if *entry.get() == 0 {
-                    queue.push_back(&dependent.id);
-                }
+            if let Occupied(entry) = entry
+                && *entry.get() == 0
+            {
+                queue.push_back(&dependent.id);
             }
         }
     }

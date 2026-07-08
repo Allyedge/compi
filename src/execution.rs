@@ -13,8 +13,8 @@ use crate::{
     output::OutputMode,
     task::Task,
     util::{
-        CommandError, cleanup_outputs, expand_globs, hash_files, output_print_lock, parse_timeout,
-        run_command_with_timeout,
+        CommandError, cleanup_outputs, expand_globs, hash_files, is_glob_pattern,
+        output_print_lock, parse_timeout, run_command_with_timeout,
     },
 };
 
@@ -107,6 +107,7 @@ pub struct TaskRunner<'a> {
     workers: usize,
     continue_on_failure: bool,
     output_mode: OutputMode,
+    delete_on_error: bool,
 }
 
 impl<'a> TaskRunner<'a> {
@@ -120,6 +121,7 @@ impl<'a> TaskRunner<'a> {
         workers: Option<usize>,
         continue_on_failure: bool,
         output_mode: OutputMode,
+        delete_on_error: bool,
     ) -> Self {
         let workers = workers.unwrap_or_else(default_workers);
         Self {
@@ -131,6 +133,7 @@ impl<'a> TaskRunner<'a> {
             workers,
             continue_on_failure,
             output_mode,
+            delete_on_error,
         }
     }
 
@@ -242,6 +245,7 @@ impl<'a> TaskRunner<'a> {
             let rm = self.rm;
             let verbose = self.verbose;
             let output_mode = self.output_mode.clone();
+            let delete_on_error = self.delete_on_error || task.delete_on_error;
 
             let handle = tokio::spawn(async move {
                 let _permit = semaphore_clone.acquire().await.unwrap();
@@ -250,8 +254,15 @@ impl<'a> TaskRunner<'a> {
                     println!("Running task: {}", task_clone.id);
                 }
 
-                Self::execute_single_task(&task_clone, default_timeout, rm, verbose, output_mode)
-                    .await
+                Self::execute_single_task(
+                    &task_clone,
+                    default_timeout,
+                    rm,
+                    verbose,
+                    output_mode,
+                    delete_on_error,
+                )
+                .await
             });
 
             handles.push((task.id.clone(), handle));
@@ -262,12 +273,11 @@ impl<'a> TaskRunner<'a> {
                 Ok(Ok(cache_updated)) => {
                     if cache_updated {
                         any_cache_updated = true;
-                        if let Some(task) = self.tasks.iter().find(|t| t.id == task_id) {
-                            if !task.inputs.is_empty() {
-                                if let Ok(hash_key) = task_cache_key(task) {
-                                    self.cache.insert(task.id.clone(), hash_key);
-                                }
-                            }
+                        if let Some(task) = self.tasks.iter().find(|t| t.id == task_id)
+                            && !task.inputs.is_empty()
+                            && let Ok(hash_key) = task_cache_key(task)
+                        {
+                            self.cache.insert(task.id.clone(), hash_key);
                         }
                     }
                 }
@@ -295,6 +305,7 @@ impl<'a> TaskRunner<'a> {
         rm: bool,
         verbose: bool,
         output_mode: OutputMode,
+        delete_on_error: bool,
     ) -> Result<bool, ()> {
         let timeout = parse_timeout(task.timeout.as_deref(), default_timeout.as_deref());
         let stream_output = matches!(output_mode, OutputMode::Stream);
@@ -310,10 +321,11 @@ impl<'a> TaskRunner<'a> {
                     Self::print_group_output(&task.id, &output);
                 }
 
-                if (rm || task.auto_remove) && !task.outputs.is_empty() {
-                    if let Err(e) = cleanup_outputs(&task.outputs, verbose) {
-                        eprintln!("Warning: Cleanup failed for task '{}': {}", task.id, e);
-                    }
+                if (rm || task.auto_remove)
+                    && !task.outputs.is_empty()
+                    && let Err(e) = cleanup_outputs(&task.outputs, verbose)
+                {
+                    eprintln!("Warning: Cleanup failed for task '{}': {}", task.id, e);
                 }
 
                 Ok(cache_updated)
@@ -329,17 +341,23 @@ impl<'a> TaskRunner<'a> {
                     let _guard = output_print_lock().lock().await;
                     Self::print_group_output(&task.id, &output);
                 }
-                cleanup_failed_outputs(task, verbose);
+                if delete_on_error {
+                    cleanup_failed_outputs(task, verbose);
+                }
                 Err(())
             }
             Err(CommandError::Timeout) => {
                 eprintln!("Error: Task '{}' timed out", task.id);
-                cleanup_failed_outputs(task, verbose);
+                if delete_on_error {
+                    cleanup_failed_outputs(task, verbose);
+                }
                 Err(())
             }
             Err(CommandError::Io(e)) => {
                 eprintln!("Error: Task '{}' failed to execute: {}", task.id, e);
-                cleanup_failed_outputs(task, verbose);
+                if delete_on_error {
+                    cleanup_failed_outputs(task, verbose);
+                }
                 Err(())
             }
         }
@@ -454,7 +472,21 @@ fn cleanup_failed_outputs(task: &Task, verbose: bool) {
         return;
     }
 
-    if let Err(e) = cleanup_outputs(&task.outputs, verbose) {
+    let inputs: HashSet<PathBuf> = expand_globs(&task.inputs)
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+    let outputs: Vec<PathBuf> = task
+        .outputs
+        .iter()
+        .filter(|output| {
+            let output_str = output.to_string_lossy();
+            !is_glob_pattern(&output_str) && !inputs.contains(*output)
+        })
+        .cloned()
+        .collect();
+
+    if let Err(e) = cleanup_outputs(&outputs, verbose) {
         eprintln!(
             "Warning: Failed to delete outputs after task '{}' failed: {}",
             task.id, e
